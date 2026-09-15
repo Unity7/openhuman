@@ -734,8 +734,7 @@ async fn apply_agent_settings_omission_preserves_prior_allow_metered_value() {
         on_disk.contains("allow_metered_agent_tools = true"),
         "expected TOML to preserve allow_metered_agent_tools = true on disk, got:\n{on_disk}"
     );
-    let on_disk_cfg: crate::config::Config =
-        toml::from_str(&on_disk).expect("parse saved TOML");
+    let on_disk_cfg: crate::config::Config = toml::from_str(&on_disk).expect("parse saved TOML");
     assert!(
         on_disk_cfg.agent.allow_metered_agent_tools,
         "deserialized TOML must preserve prior true value"

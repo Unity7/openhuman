@@ -137,7 +137,10 @@ fn test_snake_case_serialization_for_all_enum_families() {
 fn test_valid_capability_carries_every_required_field() {
     let capability = ToolCapability {
         name: "test_tool".to_string(),
-        operations: vec![CapabilityOperation::SearchWeb, CapabilityOperation::FetchUrl],
+        operations: vec![
+            CapabilityOperation::SearchWeb,
+            CapabilityOperation::FetchUrl,
+        ],
         modalities: vec![CapabilityModality::Text, CapabilityModality::WebPage],
         backend: CapabilityBackend::Local,
         monetary_boundary: MonetaryBoundary::NonMetered,
@@ -152,7 +155,10 @@ fn test_valid_capability_carries_every_required_field() {
     assert_eq!(capability.name, "test_tool");
     assert_eq!(
         capability.operations,
-        vec![CapabilityOperation::SearchWeb, CapabilityOperation::FetchUrl]
+        vec![
+            CapabilityOperation::SearchWeb,
+            CapabilityOperation::FetchUrl
+        ]
     );
     assert_eq!(
         capability.modalities,
@@ -182,13 +188,22 @@ fn test_blank_name_rejected() {
     );
 
     capability.name = "".to_string();
-    assert_eq!(capability.validate(), Err(CapabilityValidationError::BlankName));
+    assert_eq!(
+        capability.validate(),
+        Err(CapabilityValidationError::BlankName)
+    );
 
     capability.name = "   ".to_string();
-    assert_eq!(capability.validate(), Err(CapabilityValidationError::BlankName));
+    assert_eq!(
+        capability.validate(),
+        Err(CapabilityValidationError::BlankName)
+    );
 
     capability.name = "\t\n  \r".to_string();
-    assert_eq!(capability.validate(), Err(CapabilityValidationError::BlankName));
+    assert_eq!(
+        capability.validate(),
+        Err(CapabilityValidationError::BlankName)
+    );
 }
 
 #[test]
@@ -249,8 +264,14 @@ fn test_backend_monetary_boundary_compatibility_and_mismatches() {
                 (CapabilityBackend::Managed, MonetaryBoundary::ManagedMetered)
                     | (CapabilityBackend::Byok, MonetaryBoundary::UserSuppliedKey)
                     | (CapabilityBackend::Local, MonetaryBoundary::NonMetered)
-                    | (CapabilityBackend::LocalBrowser, MonetaryBoundary::NonMetered)
-                    | (CapabilityBackend::DirectNetwork, MonetaryBoundary::NonMetered)
+                    | (
+                        CapabilityBackend::LocalBrowser,
+                        MonetaryBoundary::NonMetered
+                    )
+                    | (
+                        CapabilityBackend::DirectNetwork,
+                        MonetaryBoundary::NonMetered
+                    )
             );
             assert_eq!(compatible, expected_compatible);
 
@@ -504,8 +525,9 @@ fn test_enabled_names_equals_available_and_excludes_unavailable() {
     let plan = CapabilityPlan::new(routes, None).unwrap();
 
     let enabled = plan.enabled_names();
-    let expected_names: HashSet<String> =
-        ["avail_1".to_string(), "avail_2".to_string()].into_iter().collect();
+    let expected_names: HashSet<String> = ["avail_1".to_string(), "avail_2".to_string()]
+        .into_iter()
+        .collect();
     assert_eq!(enabled, expected_names);
 
     assert!(plan.is_enabled("avail_1"));

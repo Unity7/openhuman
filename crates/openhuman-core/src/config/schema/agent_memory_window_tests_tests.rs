@@ -236,8 +236,7 @@ fn allow_metered_agent_tools_defaults_false_when_omitted() {
 
 #[test]
 fn allow_metered_agent_tools_roundtrips_explicit_true() {
-    let cfg: AgentConfig =
-        serde_json::from_str(r#"{"allow_metered_agent_tools": true}"#).unwrap();
+    let cfg: AgentConfig = serde_json::from_str(r#"{"allow_metered_agent_tools": true}"#).unwrap();
     assert!(cfg.allow_metered_agent_tools);
     let serialized = serde_json::to_string(&cfg).unwrap();
     let roundtrip: AgentConfig = serde_json::from_str(&serialized).unwrap();
@@ -246,8 +245,7 @@ fn allow_metered_agent_tools_roundtrips_explicit_true() {
 
 #[test]
 fn allow_metered_agent_tools_roundtrips_explicit_false() {
-    let cfg: AgentConfig =
-        serde_json::from_str(r#"{"allow_metered_agent_tools": false}"#).unwrap();
+    let cfg: AgentConfig = serde_json::from_str(r#"{"allow_metered_agent_tools": false}"#).unwrap();
     assert!(!cfg.allow_metered_agent_tools);
     let serialized = serde_json::to_string(&cfg).unwrap();
     let roundtrip: AgentConfig = serde_json::from_str(&serialized).unwrap();
