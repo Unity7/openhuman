@@ -416,4 +416,5 @@ fn detect_memory_intent(normalized: &str) -> (bool, bool) {
 }
 
 #[cfg(test)]
+#[path = "intent_tests.rs"]
 mod intent_tests;
