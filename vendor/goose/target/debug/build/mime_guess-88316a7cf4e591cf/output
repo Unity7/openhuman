@@ -1,1 +1,0 @@
-cargo:rustc-env=MIME_TYPES_GENERATED_PATH=C:\Bay\OpenHuman-src\vendor\goose\target\debug\build\mime_guess-88316a7cf4e591cf\out\mime_types_generated.rs

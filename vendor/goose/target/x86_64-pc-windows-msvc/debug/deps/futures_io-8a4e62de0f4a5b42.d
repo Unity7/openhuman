@@ -1,7 +1,0 @@
-C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\futures_io-8a4e62de0f4a5b42.d: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-io-0.3.34\src\lib.rs
-
-C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\libfutures_io-8a4e62de0f4a5b42.rlib: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-io-0.3.34\src\lib.rs
-
-C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\libfutures_io-8a4e62de0f4a5b42.rmeta: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-io-0.3.34\src\lib.rs
-
-C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-io-0.3.34\src\lib.rs:
