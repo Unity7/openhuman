@@ -16,6 +16,34 @@ impl ChatModel<()> for SuccessfulModel {
     }
 }
 
+struct QwenToolStreamModel;
+
+#[async_trait]
+impl ChatModel<()> for QwenToolStreamModel {
+    async fn invoke(
+        &self,
+        _state: &(),
+        _request: ModelRequest,
+    ) -> tinyinference::Result<ModelResponse> {
+        Ok(ModelResponse::assistant("unused"))
+    }
+
+    async fn stream(
+        &self,
+        _state: &(),
+        _request: ModelRequest,
+    ) -> tinyinference::Result<ModelStream> {
+        let completed = ModelResponse::assistant(
+            r#"<tool_call>{"web_fetch","arguments":{"url":"https://example.com"}}</tool_call>"#,
+        );
+        Ok(Box::pin(futures::stream::iter(vec![
+            ModelStreamItem::Started,
+            ModelStreamItem::MessageDelta(MessageDelta::text("<tool_call>")),
+            ModelStreamItem::Completed(completed),
+        ])))
+    }
+}
+
 #[tokio::test]
 async fn selected_model_records_concrete_route_and_fallback_overwrites_primary() {
     let primary = RouteRecordingModel::new(Arc::new(SuccessfulModel), "openhuman", "chat-v1");
@@ -213,4 +241,54 @@ fn qwen_missing_name_repair_rejects_ambiguous_or_acting_tools() {
     assert!(acting.tool_calls().is_empty());
     assert!(!acting.text().contains("<tool_call>"));
     assert!(acting.text().contains("invalid tool call"));
+}
+
+#[test]
+fn qwen_normalization_admits_only_the_first_tool_call() {
+    let mut response = ModelResponse::assistant("");
+    response.message.tool_calls = vec![
+        TaToolCall::new(
+            "one",
+            "web_search_tool",
+            serde_json::json!({"query": "first"}),
+        ),
+        TaToolCall::new(
+            "two",
+            "web_search_tool",
+            serde_json::json!({"query": "second"}),
+        ),
+    ];
+
+    let response = normalize_qwen_tool_response(response, &[tool_schema("web_search_tool")]);
+
+    assert_eq!(response.tool_calls().len(), 1);
+    assert_eq!(response.tool_calls()[0].id, "one");
+}
+
+#[tokio::test]
+async fn qwen_stream_hides_prompt_tool_markup_and_keeps_completed_call() {
+    use futures::StreamExt;
+
+    let route = RouteRecordingModel::new(
+        Arc::new(QwenToolStreamModel),
+        "lmstudio",
+        "qwen38-openhuman",
+    );
+    let request = ModelRequest::default().with_tools(vec![url_tool_schema("web_fetch")]);
+
+    let items: Vec<_> = route
+        .stream(&(), request)
+        .await
+        .expect("stream")
+        .collect()
+        .await;
+
+    assert!(items.iter().all(|item| !matches!(
+        item,
+        ModelStreamItem::MessageDelta(delta) if delta.text.contains("<tool_call>")
+    )));
+    assert!(items.iter().any(|item| matches!(
+        item,
+        ModelStreamItem::Completed(response) if response.tool_calls().len() == 1
+    )));
 }

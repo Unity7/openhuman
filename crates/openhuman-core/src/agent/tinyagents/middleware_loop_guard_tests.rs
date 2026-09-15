@@ -176,6 +176,17 @@ fn first_party_media_balance_failure_is_terminal_without_delegation_envelope() {
     );
 }
 
+#[test]
+fn managed_web_search_balance_failure_is_terminal_without_delegation_envelope() {
+    assert_eq!(
+        terminal_tool_failure_kind(
+            "web_search_tool",
+            "Backend returned 400 Bad Request -- Insufficient balance"
+        ),
+        Some(TerminalInferenceFailure::BudgetExhausted)
+    );
+}
+
 #[tokio::test]
 async fn delegated_insufficient_balance_halts_after_one_tool_attempt() {
     let handle = SteeringHandle::allow_all();
@@ -201,6 +212,26 @@ async fn media_insufficient_balance_halts_after_one_tool_attempt() {
     let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, summary.clone());
     let mut result = failing_result(
         "media_generate_image",
+        "Backend returned 400 Bad Request -- Insufficient balance",
+    );
+
+    mw.after_tool(&mut ctx(), &(), &mut result).await.unwrap();
+
+    assert_eq!(drain_pause_count(&handle), 1);
+    assert!(summary
+        .lock()
+        .unwrap()
+        .as_deref()
+        .is_some_and(|text| text.contains("out of inference budget/credits")));
+}
+
+#[tokio::test]
+async fn web_search_insufficient_balance_halts_after_one_tool_attempt() {
+    let handle = SteeringHandle::allow_all();
+    let summary = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, summary.clone());
+    let mut result = failing_result(
+        "web_search_tool",
         "Backend returned 400 Bad Request -- Insufficient balance",
     );
 

@@ -129,9 +129,9 @@ pub(crate) fn terminal_inference_failure_kind(result: &str) -> Option<TerminalIn
 }
 
 /// Classify terminal failures at a trusted tool boundary. Delegated inference
-/// retains its envelope requirement; first-party media generation tools expose
-/// the same provider failure directly, so their canonical tool name supplies
-/// the trust boundary.
+/// retains its envelope requirement; first-party media generation and managed
+/// web-search tools expose the same provider failure directly, so their
+/// canonical tool name supplies the trust boundary.
 pub(crate) fn terminal_tool_failure_kind(
     tool: &str,
     result: &str,
@@ -139,7 +139,10 @@ pub(crate) fn terminal_tool_failure_kind(
     if let Some(kind) = terminal_inference_failure_kind(result) {
         return Some(kind);
     }
-    if !matches!(tool, "media_generate_image" | "media_generate_video") {
+    if !matches!(
+        tool,
+        "media_generate_image" | "media_generate_video" | "web_search_tool"
+    ) {
         return None;
     }
     use crate::inference::provider::{

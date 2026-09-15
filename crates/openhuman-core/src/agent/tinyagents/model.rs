@@ -452,6 +452,22 @@ fn repair_qwen_bare_name_tool_call(
     response
 }
 
+/// Local Qwen is more reliable when it acts, observes, then decides again. A
+/// single generation occasionally emits several near-duplicate retrieval calls;
+/// admitting only the first keeps the tool loop serial and lets a terminal
+/// failure stop the turn before more paid calls launch.
+fn enforce_single_qwen_tool_call(mut response: ModelResponse) -> ModelResponse {
+    response.message.tool_calls.truncate(1);
+    response
+}
+
+fn normalize_qwen_tool_response(
+    response: ModelResponse,
+    advertised_tools: &[tinyinference::tool::ToolSchema],
+) -> ModelResponse {
+    enforce_single_qwen_tool_call(repair_qwen_bare_name_tool_call(response, advertised_tools))
+}
+
 fn repair_qwen_bare_name_text(
     text: &str,
     advertised_tools: &[tinyinference::tool::ToolSchema],
@@ -608,7 +624,7 @@ impl ChatModel<()> for RouteRecordingModel {
         let tools = request.tools.clone();
         let response = self.inner.invoke(state, request).await?;
         Ok(if repair {
-            repair_qwen_bare_name_tool_call(response, &tools)
+            normalize_qwen_tool_response(response, &tools)
         } else {
             response
         })
@@ -629,8 +645,16 @@ impl ChatModel<()> for RouteRecordingModel {
             return Ok(stream);
         }
         Ok(Box::pin(stream.map(move |item| match item {
+            // Prompt-guided tool frames arrive as visible text deltas before
+            // the completed response can parse and strip them. Suppress those
+            // deltas for this exact alias; the authoritative completed response
+            // still carries either clean prose or a structured tool call.
+            ModelStreamItem::MessageDelta(mut delta) => {
+                delta.text.clear();
+                ModelStreamItem::MessageDelta(delta)
+            }
             ModelStreamItem::Completed(response) => {
-                ModelStreamItem::Completed(repair_qwen_bare_name_tool_call(response, &tools))
+                ModelStreamItem::Completed(normalize_qwen_tool_response(response, &tools))
             }
             other => other,
         })))
