@@ -4,6 +4,7 @@
 //! select tools or infer capability metadata; that is the following gate.
 
 pub mod capability;
+pub mod intent;
 mod mode;
 mod runtime;
 
@@ -12,6 +13,7 @@ pub use capability::{
     CapabilityModality, CapabilityOperation, CapabilityPlan, CapabilityPolicy,
     CapabilitySideEffect, CapabilityValidationError, MonetaryBoundary, ToolCapability, ToolRoute,
 };
+pub use intent::{resolve_request_intent, IntentCompletion, PrimaryIntentFamily, RequestIntent};
 pub use mode::{
     resolve_orchestration_engine, resolve_primary_turn_mode, ModeResolutionInput, PrimaryTurnMode,
     LOCAL_QWEN_PROVIDER_BINDING,
