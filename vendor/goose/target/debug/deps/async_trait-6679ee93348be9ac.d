@@ -1,0 +1,12 @@
+C:\Bay\OpenHuman-src\vendor\goose\target\debug\deps\async_trait-6679ee93348be9ac.d: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\args.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\bound.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\expand.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\lifetime.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\parse.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\receiver.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\verbatim.rs
+
+C:\Bay\OpenHuman-src\vendor\goose\target\debug\deps\async_trait-6679ee93348be9ac.dll: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\args.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\bound.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\expand.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\lifetime.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\parse.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\receiver.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\verbatim.rs
+
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\lib.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\args.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\bound.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\expand.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\lifetime.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\parse.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\receiver.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-trait-0.1.92\src\verbatim.rs:

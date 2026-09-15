@@ -51,7 +51,9 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../../crates/openhuman-core/src/agent/prompts"
+      "../../crates/openhuman-core/src/agent/prompts",
+      "../../vendor/goose/LICENSE",
+      "../../vendor/goose/SOURCE.md"
     ],
     "linux": {
       "deb": {

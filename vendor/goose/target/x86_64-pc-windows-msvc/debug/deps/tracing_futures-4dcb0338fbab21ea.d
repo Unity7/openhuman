@@ -1,0 +1,10 @@
+C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\tracing_futures-4dcb0338fbab21ea.d: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\stdlib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\mod.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\futures_03.rs
+
+C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\libtracing_futures-4dcb0338fbab21ea.rlib: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\stdlib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\mod.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\futures_03.rs
+
+C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\libtracing_futures-4dcb0338fbab21ea.rmeta: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\stdlib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\mod.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\futures_03.rs
+
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\lib.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\stdlib.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\mod.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tracing-futures-0.2.5\src\executor\futures_03.rs:

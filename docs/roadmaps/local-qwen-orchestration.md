@@ -726,6 +726,19 @@ Migration stages and gates:
 No later gate begins until the previous gate is reconciled against Git and its
 literal verification command succeeds.
 
+#### Phase 7 gate reconciliation
+
+| Gate | Status | Reconciled evidence |
+| --- | --- | --- |
+| 1. Vendor and license | passed 2026-09-15 | The two upstream crate trees and Apache-2.0 license are byte-identical to Goose `53672c3f14bbf83959cea3e6fe0132a2e8b800af`; `rmcp` is fixed to the upstream lock's 3.3.0; the source notice and license are Windows bundle resources. `goose-agent` passed 17 tests. Locked MSVC checks passed for the vendored workspace, root workspace, and separate Tauri workspace. |
+| 2. Adapter | active | Starts only from the passed Gate 1 source and lock state. |
+| 3. Mode | blocked by Gate 2 | Not started. |
+| 4. Capability | blocked by Gate 3 | Not started. |
+| 5. Qwen | blocked by Gate 4 | Not started. |
+| 6. Use cases | blocked by Gate 5 | Not started. |
+| 7. Live | blocked by Gate 6 | Not started. |
+| 8. Release | blocked by Gate 7 | Not started. |
+
 #### Required automated coverage
 
 At minimum, add deterministic tests for:

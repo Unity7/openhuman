@@ -1,0 +1,14 @@
+C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\thiserror-79de91583981d2b1.d: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\build\thiserror-64e4bc8487f494f5\out/private.rs
+
+C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\libthiserror-79de91583981d2b1.rlib: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\build\thiserror-64e4bc8487f494f5\out/private.rs
+
+C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\deps\libthiserror-79de91583981d2b1.rmeta: C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\build\thiserror-64e4bc8487f494f5\out/private.rs
+
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\lib.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\aserror.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\display.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\var.rs:
+C:\Users\Bay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.20\src\private.rs:
+C:\Bay\OpenHuman-src\vendor\goose\target\x86_64-pc-windows-msvc\debug\build\thiserror-64e4bc8487f494f5\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Bay\\OpenHuman-src\\vendor\\goose\\target\\x86_64-pc-windows-msvc\\debug\\build\\thiserror-64e4bc8487f494f5\\out
