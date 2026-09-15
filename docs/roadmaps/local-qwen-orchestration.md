@@ -731,8 +731,8 @@ literal verification command succeeds.
 | Gate | Status | Reconciled evidence |
 | --- | --- | --- |
 | 1. Vendor and license | passed 2026-09-15 | The two upstream crate trees and Apache-2.0 license are byte-identical to Goose `53672c3f14bbf83959cea3e6fe0132a2e8b800af`; `rmcp` is fixed to the upstream lock's 3.3.0; the source notice and license are Windows bundle resources. `goose-agent` passed 17 tests. Locked MSVC checks passed for the vendored workspace, root workspace, and separate Tauri workspace. |
-| 2. Adapter | active | Starts only from the passed Gate 1 source and lock state. |
-| 3. Mode | blocked by Gate 2 | Not started. |
+| 2. Adapter | passed 2026-09-15 | Direct `GooseTurnAdapter` integration drives the pinned `goose_agent::machine::StateMachine`; OpenHuman transcript/tool/RMCP/TinyInference conversion, existing security and approval, `AgentProgress`, per-call versus cumulative usage, cancellation observations, and optimistic per-step checkpoints passed 9 deterministic network-free tests. A failed accepted-action commit prevents execution; approval waits only after acceptance is durable; resume does not duplicate the effect or observation. `cargo check --manifest-path crates/openhuman-core/Cargo.toml --lib` passed on MSVC. |
+| 3. Mode | active | Starts only from the passed Gate 2 adapter and checkpoint state. |
 | 4. Capability | blocked by Gate 3 | Not started. |
 | 5. Qwen | blocked by Gate 4 | Not started. |
 | 6. Use cases | blocked by Gate 5 | Not started. |

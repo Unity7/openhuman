@@ -422,6 +422,7 @@ tinyinference = { path = "../../vendor/tinyagents/vendor/tinyinference/crates/ti
 # Source and Apache-2.0 attribution: ../../vendor/goose/SOURCE.md.
 goose-agent = { path = "../../vendor/goose/crates/goose-agent" }
 goose-provider-types = { path = "../../vendor/goose/crates/goose-provider-types" }
+rmcp = { version = "=3.3.0", default-features = false, features = ["server"] }
 # TinyTools — the tool vocabulary: the `Tool` trait, `ToolResult`, and the
 # permission / scope / timeout classifications this host enforces around a call.
 #
