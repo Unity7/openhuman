@@ -125,3 +125,42 @@ fn profile_override_cache_identity_includes_request_model() {
 
     assert_ne!(first.cache_identity(), second.cache_identity());
 }
+
+fn tool_schema(name: &str) -> tinyinference::tool::ToolSchema {
+    tinyinference::tool::ToolSchema {
+        name: name.to_string(),
+        description: String::new(),
+        parameters: serde_json::json!({"type": "object"}),
+        format: Default::default(),
+    }
+}
+
+#[test]
+fn qwen_bare_name_repair_accepts_an_advertised_tool() {
+    let response = repair_qwen_bare_name_tool_call(
+        ModelResponse::assistant(
+            r#"<tool_call>{"web_fetch", "arguments": {"url": "https://example.com", "max_bytes": 6000}}</tool_call>"#,
+        ),
+        &[tool_schema("web_fetch")],
+    );
+
+    assert_eq!(response.text(), "");
+    assert_eq!(response.tool_calls().len(), 1);
+    assert_eq!(response.tool_calls()[0].name, "web_fetch");
+    assert_eq!(
+        response.tool_calls()[0].arguments,
+        serde_json::json!({"url": "https://example.com", "max_bytes": 6000})
+    );
+}
+
+#[test]
+fn qwen_bare_name_repair_rejects_an_unadvertised_tool() {
+    let text = r#"<tool_call>{"shell", "arguments": {"command": "whoami"}}</tool_call>"#;
+    let response = repair_qwen_bare_name_tool_call(
+        ModelResponse::assistant(text),
+        &[tool_schema("web_fetch")],
+    );
+
+    assert!(response.tool_calls().is_empty());
+    assert_eq!(response.text(), text);
+}

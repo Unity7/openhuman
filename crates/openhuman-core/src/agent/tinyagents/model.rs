@@ -3,9 +3,10 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use tinyinference::message::{AssistantMessage, ContentBlock, MessageDelta};
 use tinyinference::model::{
-    ChatModel, ModelProfile, ModelRequest, ModelResponse, ModelStream, ModelStreamItem,
+    ChatModel, ModelProfile, ModelRequest, ModelResponse, ModelStream, ModelStreamItem, ToolChoice,
 };
 use tinyinference::tool::{ToolCall as TaToolCall, ToolDelta};
 use tinyinference::usage::Usage;
@@ -414,6 +415,104 @@ pub(super) struct RouteRecordingModel {
     model: String,
 }
 
+/// Recover the exact malformed prompt-guided call observed from the local Qwen
+/// alias: `{"tool_name", "arguments": {...}}`. The repair is accepted only
+/// inside explicit tool-call tags, for a tool advertised on this request, and
+/// when it produces an otherwise exact valid call object.
+fn repair_qwen_bare_name_tool_call(
+    mut response: ModelResponse,
+    advertised_tools: &[tinyinference::tool::ToolSchema],
+) -> ModelResponse {
+    if !response.message.tool_calls.is_empty() {
+        return response;
+    }
+    let text = response.text();
+    let Some(repaired) = repair_qwen_bare_name_text(&text, advertised_tools) else {
+        return response;
+    };
+    response
+        .message
+        .content
+        .retain(|block| !matches!(block, ContentBlock::Text(_)));
+    response.message.content.push(ContentBlock::Text(repaired));
+    tinyagents_harness::tool::apply_prompt_tool_calls(response)
+}
+
+fn repair_qwen_bare_name_text(
+    text: &str,
+    advertised_tools: &[tinyinference::tool::ToolSchema],
+) -> Option<String> {
+    const OPEN: &str = "<tool_call>";
+    const CLOSE: &str = "</tool_call>";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut changed = false;
+    while let Some(start) = rest.find(OPEN) {
+        out.push_str(&rest[..start + OPEN.len()]);
+        let after_open = &rest[start + OPEN.len()..];
+        let Some(end) = after_open.find(CLOSE) else {
+            return None;
+        };
+        let body = &after_open[..end];
+        if let Some(repaired) = repair_qwen_bare_name_body(body, advertised_tools) {
+            out.push_str(&repaired);
+            changed = true;
+        } else {
+            out.push_str(body);
+        }
+        out.push_str(CLOSE);
+        rest = &after_open[end + CLOSE.len()..];
+    }
+    out.push_str(rest);
+    changed.then_some(out)
+}
+
+fn repair_qwen_bare_name_body(
+    body: &str,
+    advertised_tools: &[tinyinference::tool::ToolSchema],
+) -> Option<String> {
+    let after_open = body.trim().strip_prefix('{')?.trim_start();
+    let string_end = json_string_literal_end(after_open)?;
+    let name_literal = &after_open[..=string_end];
+    let name: String = serde_json::from_str(name_literal).ok()?;
+    if !advertised_tools.iter().any(|tool| tool.name == name) {
+        return None;
+    }
+    let remainder = &after_open[string_end + 1..];
+    if !remainder.trim_start().starts_with(',') {
+        return None;
+    }
+    let repaired = format!(r#"{{"name":{name_literal}{remainder}"#);
+    let value: serde_json::Value = serde_json::from_str(&repaired).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 2
+        || object.get("name").and_then(serde_json::Value::as_str) != Some(name.as_str())
+        || !object
+            .get("arguments")
+            .is_some_and(serde_json::Value::is_object)
+    {
+        return None;
+    }
+    Some(repaired)
+}
+
+fn json_string_literal_end(value: &str) -> Option<usize> {
+    if !value.starts_with('"') {
+        return None;
+    }
+    let mut escaped = false;
+    for (index, byte) in value.bytes().enumerate().skip(1) {
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            return Some(index);
+        }
+    }
+    None
+}
+
 impl RouteRecordingModel {
     pub(super) fn new(
         inner: Arc<dyn ChatModel<()>>,
@@ -448,7 +547,16 @@ impl ChatModel<()> for RouteRecordingModel {
         request: ModelRequest,
     ) -> tinyinference::Result<ModelResponse> {
         self.record_route();
-        self.inner.invoke(state, request).await
+        let repair = self.model == "qwen38-openhuman"
+            && !request.tools.is_empty()
+            && request.tool_choice != ToolChoice::None;
+        let tools = request.tools.clone();
+        let response = self.inner.invoke(state, request).await?;
+        Ok(if repair {
+            repair_qwen_bare_name_tool_call(response, &tools)
+        } else {
+            response
+        })
     }
 
     async fn stream(
@@ -457,7 +565,20 @@ impl ChatModel<()> for RouteRecordingModel {
         request: ModelRequest,
     ) -> tinyinference::Result<ModelStream> {
         self.record_route();
-        self.inner.stream(state, request).await
+        let repair = self.model == "qwen38-openhuman"
+            && !request.tools.is_empty()
+            && request.tool_choice != ToolChoice::None;
+        let tools = request.tools.clone();
+        let stream = self.inner.stream(state, request).await?;
+        if !repair {
+            return Ok(stream);
+        }
+        Ok(Box::pin(stream.map(move |item| match item {
+            ModelStreamItem::Completed(response) => {
+                ModelStreamItem::Completed(repair_qwen_bare_name_tool_call(response, &tools))
+            }
+            other => other,
+        })))
     }
 }
 
