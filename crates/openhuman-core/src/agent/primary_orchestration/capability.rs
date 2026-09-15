@@ -306,14 +306,14 @@ pub fn is_backend_monetary_compatible(
     backend: CapabilityBackend,
     monetary_boundary: MonetaryBoundary,
 ) -> bool {
-    match (backend, monetary_boundary) {
-        (CapabilityBackend::Managed, MonetaryBoundary::ManagedMetered) => true,
-        (CapabilityBackend::Byok, MonetaryBoundary::UserSuppliedKey) => true,
-        (CapabilityBackend::Local, MonetaryBoundary::NonMetered) => true,
-        (CapabilityBackend::LocalBrowser, MonetaryBoundary::NonMetered) => true,
-        (CapabilityBackend::DirectNetwork, MonetaryBoundary::NonMetered) => true,
-        _ => false,
-    }
+    matches!(
+        (backend, monetary_boundary),
+        (CapabilityBackend::Managed, MonetaryBoundary::ManagedMetered)
+            | (CapabilityBackend::Byok, MonetaryBoundary::UserSuppliedKey)
+            | (CapabilityBackend::Local, MonetaryBoundary::NonMetered)
+            | (CapabilityBackend::LocalBrowser, MonetaryBoundary::NonMetered)
+            | (CapabilityBackend::DirectNetwork, MonetaryBoundary::NonMetered)
+    )
 }
 
 /// Validate ordered routes: checking capability validity, sorting, and uniqueness.
