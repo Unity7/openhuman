@@ -4,6 +4,7 @@
 //! select tools or infer capability metadata; that is the following gate.
 
 pub mod capability;
+pub mod catalog;
 pub mod intent;
 mod mode;
 mod runtime;
@@ -12,6 +13,10 @@ pub use capability::{
     is_backend_monetary_compatible, validate_routes, CapabilityAvailability, CapabilityBackend,
     CapabilityModality, CapabilityOperation, CapabilityPlan, CapabilityPolicy,
     CapabilitySideEffect, CapabilityValidationError, MonetaryBoundary, ToolCapability, ToolRoute,
+};
+pub use catalog::{
+    build_capability_catalog, CapabilityCatalog, CapabilityCatalogError, CapabilityCatalogInputs,
+    CatalogRouteClass,
 };
 pub use intent::{resolve_request_intent, IntentCompletion, PrimaryIntentFamily, RequestIntent};
 pub use mode::{
