@@ -190,6 +190,16 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib intent_tests`;
   `git diff --check`.
 
+### G4-GX — external intent-test module seam (wave 4.3, lane capability)
+
+- Depends: G4-H.
+- Change: `crates/openhuman-core/src/agent/primary_orchestration/intent.rs`.
+- Context: None.
+- Point the existing test module declaration at the registered sibling
+  `intent_tests.rs`; do not change intent behavior or tests.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib intent_tests`;
+  `git diff --check`.
+
 ### G4-I — exact capability catalog (wave 4.3, lane catalog)
 
 - Depends: G4-A, G4-G.
