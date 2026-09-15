@@ -14,13 +14,16 @@ use goose_provider_types::conversation::{
 use rmcp::model::{CallToolResult, ContentBlock};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{messages::ConversationMessage, progress::AgentProgress};
+use crate::agent::{
+    messages::ConversationMessage, primary_orchestration::capability::ToolRoute,
+    progress::AgentProgress,
+};
 
 use super::{
     convert::{ensure_nonempty_kickoff, final_text, goose_to_openhuman, openhuman_to_goose},
     inference::OpenHumanInference,
     store::{rebuild_action_index, CheckpointRuntime},
-    tools::{GooseToolSecurity, OpenHumanToolProvider},
+    tools::{GooseToolRegistry, GooseToolSecurity, OpenHumanToolProvider},
     types::{GooseCheckpoint, GooseSession, GooseStopReason, GooseTurnOutcome, OpenHumanEffect},
     GooseCheckpointStore,
 };
@@ -111,7 +114,9 @@ pub struct GooseTurnAdapter {
     pub model: Arc<dyn tinyinference::model::ChatModel<()>>,
     pub model_name: String,
     pub provider_id: String,
-    pub tools: Vec<Arc<dyn crate::tools::Tool>>,
+    pub durable_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+    pub synthesized_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+    pub routes: Vec<ToolRoute>,
     pub security: Arc<dyn GooseToolSecurity>,
     pub progress: Option<tokio::sync::mpsc::Sender<AgentProgress>>,
     pub cancel: CancellationToken,
@@ -138,7 +143,11 @@ impl GooseTurnAdapter {
         self.progress(AgentProgress::TurnStarted).await;
 
         let provider = Arc::new(OpenHumanToolProvider {
-            tools: self.tools.clone(),
+            registry: GooseToolRegistry::new(
+                self.durable_tools.clone(),
+                self.synthesized_tools.clone(),
+                self.routes.clone(),
+            ),
             security: self.security.clone(),
             store: self.store.clone(),
             progress: self.progress.clone(),

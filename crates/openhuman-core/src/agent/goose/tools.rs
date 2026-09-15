@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -7,7 +7,11 @@ use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, ErrorData
 use tinyagents_harness::host::security_gate::{GateDecision, SecurityGate, ToolCallRequest};
 
 use crate::{
-    agent::{progress::AgentProgress, tinyagents::tools::execute_openhuman_tool},
+    agent::{
+        primary_orchestration::capability::{CapabilityPlan, ToolRoute},
+        progress::AgentProgress,
+        tinyagents::tools::execute_openhuman_tool,
+    },
     security::approval::{ApprovalGate, ExecutionOutcome},
 };
 
@@ -48,11 +52,87 @@ impl GooseToolSecurity for crate::agent::tinyagents::host::OpenHumanSecurityGate
     }
 }
 
+pub struct GooseToolRegistry {
+    pub durable_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+    pub synthesized_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+    pub routes: Vec<ToolRoute>,
+    pub enabled_names: HashSet<String>,
+}
+
+impl GooseToolRegistry {
+    pub fn new(
+        durable_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+        synthesized_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+        routes: Vec<ToolRoute>,
+    ) -> Self {
+        let enabled_names = CapabilityPlan::derive_enabled_names(&routes);
+        Self {
+            durable_tools,
+            synthesized_tools,
+            routes,
+            enabled_names,
+        }
+    }
+
+    pub fn enabled_names(&self) -> &HashSet<String> {
+        &self.enabled_names
+    }
+
+    pub fn is_enabled(&self, name: &str) -> bool {
+        self.enabled_names.contains(name)
+    }
+
+    pub fn resolve(&self, name: &str) -> Option<&dyn crate::tools::Tool> {
+        self.durable_tools
+            .iter()
+            .find(|tool| tool.name() == name)
+            .map(|tool| tool.as_ref())
+            .or_else(|| {
+                self.synthesized_tools
+                    .iter()
+                    .find(|tool| tool.name() == name)
+                    .map(|tool| tool.as_ref())
+            })
+    }
+
+    pub fn advertised_tools(&self) -> Result<Vec<Tool>> {
+        let mut tools = Vec::new();
+        for route in &self.routes {
+            if !self.enabled_names.contains(&route.capability.name) {
+                continue;
+            }
+            let Some(tool) = self.resolve(&route.capability.name) else {
+                continue;
+            };
+            tools.push(rmcp_definition(tool)?);
+        }
+        Ok(tools)
+    }
+}
+
 pub(super) struct OpenHumanToolProvider {
-    pub tools: Vec<Arc<dyn crate::tools::Tool>>,
+    pub registry: GooseToolRegistry,
     pub security: Arc<dyn GooseToolSecurity>,
     pub store: Arc<dyn GooseCheckpointStore>,
     pub progress: Option<tokio::sync::mpsc::Sender<AgentProgress>>,
+}
+
+impl OpenHumanToolProvider {
+    pub fn new(
+        durable_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+        synthesized_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
+        routes: Vec<ToolRoute>,
+        security: Arc<dyn GooseToolSecurity>,
+        store: Arc<dyn GooseCheckpointStore>,
+        progress: Option<tokio::sync::mpsc::Sender<AgentProgress>>,
+    ) -> Self {
+        Self {
+            registry: GooseToolRegistry::new(durable_tools, synthesized_tools, routes),
+            security,
+            store,
+            progress,
+        }
+    }
 }
 
 fn schema_object(
@@ -80,10 +160,7 @@ fn denied_result(reason: String) -> CallToolResult {
 #[async_trait]
 impl ToolProvider<GooseSession> for OpenHumanToolProvider {
     async fn tools(&self, _session: &GooseSession) -> Result<Vec<Tool>> {
-        self.tools
-            .iter()
-            .map(|tool| rmcp_definition(tool.as_ref()))
-            .collect()
+        self.registry.advertised_tools()
     }
 
     async fn call(
@@ -95,13 +172,15 @@ impl ToolProvider<GooseSession> for OpenHumanToolProvider {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let arguments = serde_json::Value::Object(call.arguments.clone().unwrap_or_default());
         let tool_name = call.name.to_string();
-        let tool = self
-            .tools
-            .iter()
-            .find(|tool| tool.name() == tool_name)
-            .ok_or_else(|| {
-                ErrorData::invalid_params(format!("unknown tool '{tool_name}'"), None)
-            })?;
+        if !self.registry.is_enabled(&tool_name) {
+            return Err(ErrorData::invalid_params(
+                format!("tool '{tool_name}' is not enabled"),
+                None,
+            ));
+        }
+        let tool = self.registry.resolve(&tool_name).ok_or_else(|| {
+            ErrorData::invalid_params(format!("unknown tool '{tool_name}'"), None)
+        })?;
 
         // The action must have been durably accepted by the previous Goose
         // inference step. Refuse to execute from transient in-memory state.
@@ -171,7 +250,7 @@ impl ToolProvider<GooseSession> for OpenHumanToolProvider {
             tool_name.clone(),
             arguments.clone(),
         );
-        let result = execute_openhuman_tool(tool.as_ref(), tiny_call, None).await;
+        let result = execute_openhuman_tool(tool, tiny_call, None).await;
         let success = result.error.is_none();
         self.security
             .record_execution(request_id, success, result.error.as_deref());
