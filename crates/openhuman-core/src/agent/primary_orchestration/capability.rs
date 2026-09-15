@@ -311,8 +311,14 @@ pub fn is_backend_monetary_compatible(
         (CapabilityBackend::Managed, MonetaryBoundary::ManagedMetered)
             | (CapabilityBackend::Byok, MonetaryBoundary::UserSuppliedKey)
             | (CapabilityBackend::Local, MonetaryBoundary::NonMetered)
-            | (CapabilityBackend::LocalBrowser, MonetaryBoundary::NonMetered)
-            | (CapabilityBackend::DirectNetwork, MonetaryBoundary::NonMetered)
+            | (
+                CapabilityBackend::LocalBrowser,
+                MonetaryBoundary::NonMetered
+            )
+            | (
+                CapabilityBackend::DirectNetwork,
+                MonetaryBoundary::NonMetered
+            )
     )
 }
 
