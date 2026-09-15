@@ -7,6 +7,7 @@ pub mod capability;
 pub mod catalog;
 pub mod intent;
 mod mode;
+pub mod planner;
 mod runtime;
 
 pub use capability::{
@@ -23,6 +24,7 @@ pub use mode::{
     resolve_orchestration_engine, resolve_primary_turn_mode, ModeResolutionInput, PrimaryTurnMode,
     LOCAL_QWEN_PROVIDER_BINDING,
 };
+pub use planner::{plan_capabilities, CapabilityPlannerInput};
 pub(crate) use runtime::{
     clear_primary_checkpoint, has_live_primary_checkpoint, primary_checkpoint_store,
 };
