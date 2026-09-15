@@ -613,6 +613,7 @@ async fn apply_agent_settings_updates_timeout_and_persists_snapshot() {
         &mut cfg,
         AgentSettingsPatch {
             agent_timeout_secs: Some(300),
+            ..Default::default()
         },
     )
     .await
@@ -629,4 +630,164 @@ async fn apply_agent_settings_updates_timeout_and_persists_snapshot() {
         .any(|l| l.contains("agent settings saved to")));
     // With no env override, the live runtime now reflects the saved value.
     assert_eq!(crate::tools::timeout::tool_execution_timeout_secs(), 300);
+}
+
+#[tokio::test]
+async fn apply_agent_settings_persists_allow_metered_agent_tools_boolean() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir().unwrap();
+    let mut cfg = tmp_config(&tmp);
+
+    // Persist true
+    let outcome_true = apply_agent_settings(
+        &mut cfg,
+        AgentSettingsPatch {
+            allow_metered_agent_tools: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("apply allow_metered_agent_tools=true");
+
+    assert!(cfg.agent.allow_metered_agent_tools);
+    assert_eq!(
+        outcome_true.value["config"]["agent"]["allow_metered_agent_tools"],
+        serde_json::json!(true)
+    );
+    let on_disk_true = tokio::fs::read_to_string(&cfg.config_path).await.unwrap();
+    assert!(
+        on_disk_true.contains("allow_metered_agent_tools = true"),
+        "expected TOML to persist allow_metered_agent_tools = true, got:\n{on_disk_true}"
+    );
+    let on_disk_cfg_true: crate::config::Config =
+        toml::from_str(&on_disk_true).expect("parse saved TOML");
+    assert!(on_disk_cfg_true.agent.allow_metered_agent_tools);
+
+    // Persist false
+    let outcome_false = apply_agent_settings(
+        &mut cfg,
+        AgentSettingsPatch {
+            allow_metered_agent_tools: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("apply allow_metered_agent_tools=false");
+
+    assert!(!cfg.agent.allow_metered_agent_tools);
+    assert_eq!(
+        outcome_false.value["config"]["agent"]["allow_metered_agent_tools"],
+        serde_json::json!(false)
+    );
+    let on_disk_false = tokio::fs::read_to_string(&cfg.config_path).await.unwrap();
+    assert!(
+        on_disk_false.contains("allow_metered_agent_tools = false"),
+        "expected TOML to persist allow_metered_agent_tools = false, got:\n{on_disk_false}"
+    );
+    let on_disk_cfg_false: crate::config::Config =
+        toml::from_str(&on_disk_false).expect("parse saved TOML");
+    assert!(!on_disk_cfg_false.agent.allow_metered_agent_tools);
+}
+
+#[tokio::test]
+async fn apply_agent_settings_omission_preserves_prior_allow_metered_value() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir().unwrap();
+    let mut cfg = tmp_config(&tmp);
+
+    // First, set to true
+    apply_agent_settings(
+        &mut cfg,
+        AgentSettingsPatch {
+            allow_metered_agent_tools: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("set allow_metered=true");
+    assert!(cfg.agent.allow_metered_agent_tools);
+
+    // Update only timeout, omitting allow_metered_agent_tools (None)
+    let outcome = apply_agent_settings(
+        &mut cfg,
+        AgentSettingsPatch {
+            agent_timeout_secs: Some(180),
+            allow_metered_agent_tools: None,
+        },
+    )
+    .await
+    .expect("apply patch with omitted allow_metered_agent_tools");
+
+    assert_eq!(cfg.agent.agent_timeout_secs, 180);
+    assert!(
+        cfg.agent.allow_metered_agent_tools,
+        "omission must preserve prior true value in memory"
+    );
+    assert_eq!(
+        outcome.value["config"]["agent"]["allow_metered_agent_tools"],
+        serde_json::json!(true),
+        "snapshot must preserve prior true value"
+    );
+
+    let on_disk = tokio::fs::read_to_string(&cfg.config_path).await.unwrap();
+    assert!(
+        on_disk.contains("allow_metered_agent_tools = true"),
+        "expected TOML to preserve allow_metered_agent_tools = true on disk, got:\n{on_disk}"
+    );
+    let on_disk_cfg: crate::config::Config =
+        toml::from_str(&on_disk).expect("parse saved TOML");
+    assert!(
+        on_disk_cfg.agent.allow_metered_agent_tools,
+        "deserialized TOML must preserve prior true value"
+    );
+}
+
+#[tokio::test]
+async fn apply_agent_settings_getter_exposes_saved_allow_metered_boolean() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempdir().unwrap();
+    unsafe {
+        std::env::set_var("OPENHUMAN_WORKSPACE", tmp.path());
+    }
+
+    // Default getter value is false
+    let initial = get_agent_settings().await.expect("initial get");
+    assert_eq!(
+        initial.value["allow_metered_agent_tools"],
+        serde_json::json!(false)
+    );
+
+    // Update to true via load_and_apply_agent_settings
+    load_and_apply_agent_settings(AgentSettingsPatch {
+        allow_metered_agent_tools: Some(true),
+        ..Default::default()
+    })
+    .await
+    .expect("apply true");
+
+    // Getter exposes true
+    let after_true = get_agent_settings().await.expect("get after true");
+    assert_eq!(
+        after_true.value["allow_metered_agent_tools"],
+        serde_json::json!(true)
+    );
+
+    // Update back to false
+    load_and_apply_agent_settings(AgentSettingsPatch {
+        allow_metered_agent_tools: Some(false),
+        ..Default::default()
+    })
+    .await
+    .expect("apply false");
+
+    // Getter exposes false
+    let after_false = get_agent_settings().await.expect("get after false");
+    assert_eq!(
+        after_false.value["allow_metered_agent_tools"],
+        serde_json::json!(false)
+    );
+
+    unsafe {
+        std::env::remove_var("OPENHUMAN_WORKSPACE");
+    }
 }
