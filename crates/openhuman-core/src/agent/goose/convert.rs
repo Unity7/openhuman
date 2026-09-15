@@ -186,7 +186,7 @@ pub(super) fn goose_to_openhuman(conversation: &Conversation) -> Vec<Conversatio
             continue;
         }
 
-        let role = marked_role(message).unwrap_or_else(|| match message.role {
+        let role = marked_role(message).unwrap_or(match message.role {
             rmcp::model::Role::Assistant => "assistant",
             rmcp::model::Role::User => "user",
         });

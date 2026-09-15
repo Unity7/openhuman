@@ -480,9 +480,7 @@ fn repair_qwen_bare_name_text(
     while let Some(start) = rest.find(OPEN) {
         out.push_str(&rest[..start + OPEN.len()]);
         let after_open = &rest[start + OPEN.len()..];
-        let Some(end) = after_open.find(CLOSE) else {
-            return None;
-        };
+        let end = after_open.find(CLOSE)?;
         let body = &after_open[..end];
         if let Some(repaired) = repair_qwen_bare_name_body(body, advertised_tools)
             .or_else(|| repair_qwen_missing_name_body(body, advertised_tools))
