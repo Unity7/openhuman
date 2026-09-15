@@ -728,6 +728,12 @@ literal verification command succeeds.
 
 #### Phase 7 gate reconciliation
 
+Implementation work after Gate 3 is decomposed in
+[`local-qwen-orchestration-tasks.md`](local-qwen-orchestration-tasks.md). That
+file is an execution registry only: this roadmap remains the sole source of
+product requirements and gate acceptance. Workers receive one compact task
+contract extracted by the orchestrator and do not read either document.
+
 | Gate | Status | Reconciled evidence |
 | --- | --- | --- |
 | 1. Vendor and license | passed 2026-09-15 | The two upstream crate trees and Apache-2.0 license are byte-identical to Goose `53672c3f14bbf83959cea3e6fe0132a2e8b800af`; `rmcp` is fixed to the upstream lock's 3.3.0; the source notice and license are Windows bundle resources. `goose-agent` passed 17 tests. Locked MSVC checks passed for the vendored workspace, root workspace, and separate Tauri workspace. |
