@@ -57,7 +57,7 @@ pub(crate) use message_trim::{legacy_max_input_tokens, ImageAwareMessageTrimMidd
 pub(crate) use prompt_cache::PromptCacheSegmentMiddleware;
 pub(crate) use repeat_progress::RepeatProgressMiddleware;
 pub(crate) use repeated_failure::RepeatedToolFailureMiddleware;
-pub(crate) use tool_exposure::OpenHumanToolExposureShadowMiddleware;
+pub(crate) use tool_exposure::OpenHumanToolExposureMiddleware;
 pub(crate) use tool_outcome_capture::ToolOutcomeCaptureMiddleware;
 pub(crate) use tool_policy::ToolPolicyMiddleware;
 pub(crate) use turn_context::{HandoffConfig, TranscriptSnapshotSink, TurnContextMiddleware};

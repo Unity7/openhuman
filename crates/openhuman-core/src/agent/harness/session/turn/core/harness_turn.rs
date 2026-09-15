@@ -161,6 +161,7 @@ impl Agent {
                     turn_models,
                     model: effective_model.to_string(),
                     messages,
+                    task_prompt: user_message.to_string(),
                     tools: turn_tools,
                     synthesized_tools: turn_synthesized_tools,
                     visible_tool_names: turn_visible_tool_names,
@@ -225,6 +226,9 @@ impl Agent {
         let mut output_tokens = outcome.output_tokens;
         let mut cached_input_tokens = outcome.cached_input_tokens;
         let mut charged_amount_usd = outcome.charged_amount_usd;
+        let mut context_used_tokens = outcome
+            .last_call_input_tokens
+            .saturating_add(outcome.last_call_output_tokens);
 
         let reply = if outcome.hit_cap
             && outcome.wrap_up_injected
@@ -280,6 +284,7 @@ impl Agent {
                 output_tokens += u.output_tokens;
                 cached_input_tokens += u.cached_input_tokens;
                 charged_amount_usd += u.charged_amount_usd;
+                context_used_tokens = u.input_tokens.saturating_add(u.output_tokens);
             }
             let checkpoint = if summary.trim().is_empty() {
                 turn_checkpoint::build_deterministic_checkpoint(
@@ -352,6 +357,7 @@ impl Agent {
                 output_tokens += u.output_tokens;
                 cached_input_tokens += u.cached_input_tokens;
                 charged_amount_usd += u.charged_amount_usd;
+                context_used_tokens = u.input_tokens.saturating_add(u.output_tokens);
             }
             let final_answer = if summary.trim().is_empty() {
                 turn_checkpoint::build_deterministic_final_summary(&tool_records_from_conversation(
@@ -450,6 +456,7 @@ impl Agent {
                         output_tokens += u.output_tokens;
                         cached_input_tokens += u.cached_input_tokens;
                         charged_amount_usd += u.charged_amount_usd;
+                        context_used_tokens = u.input_tokens.saturating_add(u.output_tokens);
                     }
                     replace_last_assistant_reply(&mut self.history, &repaired);
                     repaired
@@ -480,6 +487,7 @@ impl Agent {
                 cached_input_tokens,
                 cost_usd: charged_amount_usd,
                 context_window: context_window.unwrap_or(0),
+                context_used_tokens,
                 subagents: subagent_usage_entries,
             });
 

@@ -1,3 +1,6 @@
+use super::loop_guards::{
+    is_recoverable_tool_failure, terminal_inference_failure_kind, TerminalInferenceFailure,
+};
 use super::*;
 
 #[tokio::test]
@@ -129,6 +132,47 @@ async fn repeated_tool_failure_pauses_only_after_the_threshold() {
         1,
         "the third identical failure should pause (halt) the run"
     );
+}
+
+#[test]
+fn delegated_insufficient_balance_is_terminal_but_transient_failures_are_not() {
+    let balance = "image_agent failed and did not complete: backend HTTP 400: insufficient balance";
+    assert_eq!(
+        terminal_inference_failure_kind(balance),
+        Some(TerminalInferenceFailure::BudgetExhausted)
+    );
+    assert_eq!(
+        terminal_inference_failure_kind(
+            "image_agent failed and did not complete: 503 service unavailable"
+        ),
+        None
+    );
+    assert!(is_recoverable_tool_failure(
+        "image_agent failed and did not complete: 503 service unavailable"
+    ));
+    assert_eq!(
+        terminal_inference_failure_kind("arbitrary command stderr: insufficient balance"),
+        None,
+        "untrusted tool output without the delegation envelope must not stop the run"
+    );
+}
+
+#[tokio::test]
+async fn delegated_insufficient_balance_halts_after_one_tool_attempt() {
+    let handle = SteeringHandle::allow_all();
+    let summary = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, summary.clone());
+    let error = "image_agent failed and did not complete: backend HTTP 400: insufficient balance";
+    let mut result = failing_result("spawn_subagent", error);
+
+    mw.after_tool(&mut ctx(), &(), &mut result).await.unwrap();
+
+    assert_eq!(drain_pause_count(&handle), 1);
+    assert!(summary
+        .lock()
+        .unwrap()
+        .as_deref()
+        .is_some_and(|text| text.contains("out of inference budget/credits")));
 }
 
 #[tokio::test]
