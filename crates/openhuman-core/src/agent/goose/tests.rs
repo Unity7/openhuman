@@ -824,9 +824,16 @@ async fn tool_present_in_either_snapshot_but_omitted_from_routes_is_neither_adve
         CancellationToken::new(),
     );
 
-    // Attempting to execute omitted durable tool must fail.
-    let result = adapter.run("omitted-durable").await;
-    assert!(result.is_err());
+    // Attempting to execute omitted durable tool records a failed observation.
+    let outcome = adapter.run("omitted-durable").await.unwrap();
+    let observation = outcome.checkpoint.actions["call-omitted"]
+        .observation
+        .as_ref()
+        .unwrap();
+    assert!(!observation.success);
+    assert!(observation
+        .output
+        .contains("tool 'omitted_durable' is not enabled"));
     assert_eq!(calls_durable.load(Ordering::SeqCst), 0);
     assert_eq!(calls_synth.load(Ordering::SeqCst), 0);
     assert_eq!(calls_routed.load(Ordering::SeqCst), 0);
@@ -837,7 +844,7 @@ async fn tool_present_in_either_snapshot_but_omitted_from_routes_is_neither_adve
     assert_eq!(requests[0].tools.len(), 1);
     assert_eq!(requests[0].tools[0].name, "routed_tool");
 
-    // Also verify omitted synthesized tool execution fails.
+    // Also verify omitted synthesized tool execution records a failed observation.
     store.insert(
         "omitted-synth",
         GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
@@ -858,8 +865,15 @@ async fn tool_present_in_either_snapshot_but_omitted_from_routes_is_neither_adve
         None,
         CancellationToken::new(),
     );
-    let result_synth = adapter_synth.run("omitted-synth").await;
-    assert!(result_synth.is_err());
+    let outcome_synth = adapter_synth.run("omitted-synth").await.unwrap();
+    let observation_synth = outcome_synth.checkpoint.actions["call-synth"]
+        .observation
+        .as_ref()
+        .unwrap();
+    assert!(!observation_synth.success);
+    assert!(observation_synth
+        .output
+        .contains("tool 'omitted_synth' is not enabled"));
     assert_eq!(calls_synth.load(Ordering::SeqCst), 0);
 }
 
@@ -915,8 +929,15 @@ async fn rejected_unplanned_call_reaches_neither_security_authorization_nor_exec
         CancellationToken::new(),
     );
 
-    let result = adapter.run("unplanned").await;
-    assert!(result.is_err());
+    let outcome = adapter.run("unplanned").await.unwrap();
+    let observation = outcome.checkpoint.actions["call-unplanned"]
+        .observation
+        .as_ref()
+        .unwrap();
+    assert!(!observation.success);
+    assert!(observation
+        .output
+        .contains("tool 'unplanned_tool' is not enabled"));
     assert_eq!(auth_calls.load(Ordering::SeqCst), 0);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
