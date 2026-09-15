@@ -4,9 +4,17 @@ Status: active
 Owner: OpenHuman host integration
 Branch: `fix/local-qwen-history`
 Baseline: `c49bfeecd5406d87c3727f744fcb988217c8dccd`
-Current implementation head: `f6504d24248d85d837b13ae47c985022ab760257`
+Current implementation head: `28c9357ace48811c9d671c59610cc3f9ffaaeebf`
 
-## Objective
+Architecture decision update (2026-09-15): Phase 7 supersedes the earlier
+decision to retain TinyAgents as the primary-chat loop. The live build proved
+that correct Qwen parsing and narrower schemas are insufficient while ordinary
+chat, tool-assisted requests, and autonomous work share one loop and while
+managed, metered capabilities are enabled without an explicit cost policy.
+Phases 0-6 remain historical evidence and regression requirements; Phase 7 is
+the authoritative design for the next build.
+
+## Historical objective (Phases 0-6; superseded by Phase 7)
 
 Make `lmstudio:qwen38-openhuman` a reliable primary orchestrator without
 replacing OpenHuman, TinyAgents, LM Studio, llama.cpp, the model, or the current
@@ -59,7 +67,7 @@ No new orchestration framework is allowed unless the existing TinyAgents
 surfaces demonstrably cannot meet an acceptance criterion. Python and
 Qwen-Agent must not enter the shipped process.
 
-## Architecture decision
+## Historical architecture decision (Phases 0-6; superseded by Phase 7)
 
 OpenHuman remains the policy and execution host. TinyAgents remains the Rust
 agent loop. LM Studio/llama.cpp remains the inference and Qwen-format adapter.
@@ -428,6 +436,395 @@ Gate: every Phase 6 scenario passes against deterministic fixtures and the live
 `lmstudio:qwen38-openhuman` route, all relevant existing tests remain green,
 the exact diff is reviewed, and the source tree is clean.
 
+### Phase 7: replace the primary-chat orchestration layer
+
+#### Decision
+
+Replace the primary interactive-chat control loop with a pinned, attributed
+Goose Agent state-machine integration. Do not write another general-purpose
+agent loop. Use Qwen-Agent as the protocol oracle for the local-Qwen adapter,
+and use Smolagents only as a behavioral reference for explicit completion and
+small, single-action steps.
+
+The imported runtime is the orchestration mechanism, not OpenHuman's product
+policy. OpenHuman continues to own its tool implementations, security policy,
+approvals, workspace boundaries, persistence, UI events, and the decision to
+permit metered services.
+
+Reference snapshots used for the design:
+
+- Goose `goose-agent`, commit
+  `53672c3f14bbf83959cea3e6fe0132a2e8b800af`, Apache-2.0:
+  <https://github.com/block/goose/tree/53672c3f14bbf83959cea3e6fe0132a2e8b800af/crates/goose-agent>
+- Qwen-Agent function-calling adapter, commit
+  `31a4d36d123688581a9e9744427272b33ce940e0`, Apache-2.0:
+  <https://github.com/QwenLM/Qwen-Agent/tree/31a4d36d123688581a9e9744427272b33ce940e0/qwen_agent/llm>
+- Smolagents multi-step agent and default web tools, commit
+  `30bb1161095dbae2271e6bc3cc4c219cc3897a57`, Apache-2.0:
+  <https://github.com/huggingface/smolagents/tree/30bb1161095dbae2271e6bc3cc4c219cc3897a57/src/smolagents>
+
+Any copied source must retain its license header and be accompanied by the
+upstream license and a source/commit notice. No code is to be copied from
+community posts or non-compatible projects.
+
+#### Why the current architecture is rejected
+
+The shipped default is a hybrid cloud agent even when inference is local:
+
+- empty primary-chat visibility means the whole configured tool surface;
+- search defaults to `managed`, whose canonical tool posts to the TinyHumans
+  `/agent-integrations/parallel/search` backend;
+- `web_search_tool` is a default-on family;
+- signing in is enough to construct backend-billed media-generation tools;
+- browser automation is disabled by default;
+- tool schemas do not carry availability, backend class, monetary boundary,
+  result modality, or fallback priority;
+- the Phase 2/6 lexical planner returns an unordered set and cannot express
+  route order or cost boundaries;
+- every user message enters the same iterative agent loop, including greetings
+  and questions that require no action.
+
+That design is valid for a managed-service product, but it does not satisfy a
+local-first assistant contract. The Phase 7 build must make the distinction
+explicit in executable types rather than prompt prose.
+
+#### User-visible execution modes
+
+Every primary turn resolves exactly one mode before any model call. Resolution
+is deterministic and local; it must not spend another model call on routing.
+
+| Mode | Purpose | Model-call rule | Tool rule |
+| --- | --- | --- | --- |
+| `chat` | explanation, conversation, transformation of supplied text, or a question answerable from the model/context | exactly one call | no task tools; no memory recall; no delegation |
+| `assist` | a bounded request requiring current data or one/few concrete actions | model, one action at a time, final model response; default maximum 3 calls | only the ordered capabilities selected for this request |
+| `agent` | explicitly autonomous, multi-step work with verification, persistent goal, scheduling, or delegation | Goose state machine until completion/pause; configurable bounded maximum, default 12 | capability plan plus live state-required tools |
+
+Mode resolution precedence:
+
+1. An explicit user/UI override (`chat`, `assist`, or `agent`) wins.
+2. A live resumable agent checkpoint remains `agent` unless the user cancels it.
+3. A request explicitly asking to execute, build, edit, browse, fetch current
+   information, schedule, remember, delegate, monitor, or continue an action is
+   `assist` or `agent` according to whether it requires durable/multi-step work.
+4. Everything else is `chat`.
+5. Ambiguity defaults downward: `chat` before `assist`, and `assist` before
+   `agent`. The system must never escalate merely because a tool exists.
+
+The initial implementation may expose the resolved mode in logs and diagnostics
+without adding a new UI control. The architecture must nevertheless accept an
+explicit override so a later UI selector does not require another loop rewrite.
+
+#### Capability contract
+
+Replace name-substring matching with one typed descriptor per registered tool:
+
+```text
+ToolCapability {
+  name
+  operations[]          // answer, search, fetch, navigate, read, write,
+                        // execute, generate, remember, schedule, delegate
+  modalities[]          // text, web-page, image, audio, video, file
+  backend               // local, local-browser, direct-network,
+                        // user-byok, openhuman-managed
+  monetary_boundary     // none, user's external account, TinyHumans balance
+  side_effect           // none, local reversible, external reversible,
+                        // external irreversible
+  availability          // ready, disabled, unhealthy, missing-credential
+  permission_level
+  priority
+}
+```
+
+Registration order is stable and preserved. The per-turn plan is an ordered
+`Vec<ToolRoute>`, not a `HashSet`. A derived set may be used only for constant-
+time enforcement. The ordered route is authoritative for prompt order,
+fallbacks, diagnostics, and tests.
+
+A capability is model-visible only when all of these are true:
+
+1. compiled and registered;
+2. enabled by runtime and user settings;
+3. healthy enough to execute now;
+4. allowed by the session/profile/channel/security ceiling;
+5. relevant to the resolved turn mode and requested operation;
+6. inside the turn's monetary boundary.
+
+Tool descriptions must state what the operation returns and whether it causes
+an external effect. Cost policy must never depend on whether the model notices
+phrases such as “billed by the backend” inside a schema.
+
+#### Monetary and provider policy
+
+Default policy is local-first and no-surprise-spend:
+
+1. `local` and `local-browser` routes;
+2. `direct-network` routes that do not use a metered API;
+3. explicitly configured user-BYOK routes;
+4. TinyHumans-managed or other metered routes only after explicit opt-in.
+
+Signing into OpenHuman does not constitute permission to spend. Selecting a
+specific metered search engine or enabling “Allow metered agent tools” does.
+The permission is persisted as an explicit setting, is visible in diagnostics,
+and can be overridden downward per turn. A model may not grant or broaden it.
+
+When a route reports insufficient balance, quota exhaustion, invalid
+credentials, or a missing provider, mark that route unavailable for the rest
+of the turn. Continue only to the next already-authorized route. Never switch
+from local/free to metered, or from retrieval to generation, as fallback.
+
+#### Required intent policies
+
+These policies are OpenHuman customization and must be represented as data plus
+tests, not as an expanding natural-language prompt:
+
+| Request | Mode | Ordered route | Prohibited behavior | Completion |
+| --- | --- | --- | --- | --- |
+| greeting/general question | `chat` | none | memory, goals, skills, delegation, retries | one answer |
+| current news/general web search | `assist` | configured local-browser search; configured non-metered search; opted-in BYOK; opted-in managed search | workspace/media/delegation and silent metered fallback | sourced answer, not raw feed |
+| known URL | `assist` | `web_fetch`; browser if page requires interaction | search API before trying supplied URL | answer derived from bounded page content |
+| find/show an existing image | `assist` | image-capable browser/search, then fetch/validate result | image generation and bare navigation-only completion | rendered image result plus source |
+| generate/edit an image | `assist` | configured local generator, then explicitly opted-in remote generator | treating search as generation or spending without opt-in | produced artifact or capability-unavailable answer |
+| explicit memory request | `assist` | healthy memory tool only | recalling on unrelated turns; advertising an unhealthy module | recalled/stored result or one clear unavailable answer |
+| repository change | `agent` | workspace read/edit/test tools under existing policy | web/media unless requested | verified diff or blocker |
+| scheduled/monitored task | `agent` | scheduler plus task-required tools | pretending a one-shot answer created a schedule | durable schedule identifier/status |
+
+If no allowed route exists, the model receives no fake substitute. OpenHuman
+returns a deterministic capability-unavailable observation that names the
+missing configuration without claiming work occurred.
+
+#### Goose state-machine integration
+
+Vendor the pinned `goose-agent` crate and the minimum compatible
+`goose-provider-types` surface. Do not import Goose Desktop, Goose providers,
+its UI, recipes, or its tool implementations. First attempt a direct vendored
+crate integration. If dependency versions conflict, adapt types at the boundary;
+do not rewrite the state machine. Any decision to port source into an
+OpenHuman-owned module instead requires an ADR showing why the pinned crate
+cannot compile and mapping every retained Goose invariant.
+
+The OpenHuman primary turn is assembled as an ordered operation list:
+
+1. load the persisted conversation/checkpoint;
+2. resolve mode and immutable capability contract;
+3. apply context compaction when required;
+4. prepare one provider request from the current state;
+5. normalize and validate the complete provider response;
+6. accept final text when it satisfies the completion contract;
+7. validate exactly one next tool action for local Qwen;
+8. enforce capability, monetary, approval, and security boundaries;
+9. execute and persist exactly one typed observation;
+10. re-enter from persisted state;
+11. yield on final answer, clarification, approval, cancellation, terminal
+    capability failure, or the mode-specific call ceiling.
+
+The state machine must reload/rederive behavior from persisted conversation
+state between passes. In-memory retry counters alone are insufficient because
+the desktop app supports interruption and resume.
+
+Adapters translate mechanically between Goose conversation effects/events and
+OpenHuman messages/progress events. OpenHuman policy remains outside those
+adapters. Existing approvals, sandbox enforcement, action-directory checks,
+and event semantics are mandatory and cannot be weakened for compatibility.
+
+#### Qwen protocol adapter
+
+The provider boundary for `lmstudio:qwen38-openhuman` follows Qwen-Agent's
+tested conversation invariants while preserving the existing prompt-guided
+mode and chat template:
+
+- assemble the complete stream before prompt-guided call parsing;
+- prefer native structured `tool_calls` if the provider supplies them;
+- accept canonical `{name, arguments}` and preserve call IDs/order;
+- serialize every accepted call followed by exactly one matching result;
+- expose at most one action per Qwen inference step even if the text contains
+  several calls; remaining calls are discarded and replanned from fresh state;
+- stop generation/parsing at tool-result/return boundaries equivalent to
+  Qwen-Agent's `FN_RESULT` and `FN_EXIT` semantics;
+- keep reasoning text separate from user-visible answer text;
+- never render raw `<tool_call>` markup;
+- allow one schema-informed correction for malformed, unknown, or ambiguous
+  calls, then terminate clearly;
+- never infer a missing destructive tool or synthesize missing arguments.
+
+This adapter is a provider dialect adapter, not a second agent loop.
+
+#### Completion and loop policy
+
+Every turn has a machine-checkable completion contract:
+
+- `chat`: non-empty final assistant text;
+- news/search: final text containing the requested bounded result and sources;
+- image retrieval: at least one validated image result/source rendered to the
+  client, not merely a search-results page URL;
+- artifact generation: an existing artifact path/URL plus final explanation;
+- repository mutation: recorded change plus requested verification status;
+- scheduling: persisted schedule identifier and state;
+- clarification/approval: explicit yielded question or approval request.
+
+A successful tool observation is not completion unless the contract says the
+tool result itself is the product. After an informational tool call, the state
+machine normally performs one final model call. It may use a deterministic
+renderer instead when the tool returns a complete typed result and model
+summarization is unnecessary or unavailable.
+
+Loop guards are typed and stateful:
+
+- identical call signature twice without changed relevant state: stop;
+- same typed failure twice: stop, unless retry guidance explicitly authorizes
+  one delayed retry;
+- unavailable tool request: one correction, then stop;
+- no progress across two state-machine passes: stop;
+- call ceiling: yield a resumable checkpoint only for `agent`; `chat` and
+  `assist` return a bounded failure rather than pretending success.
+
+#### Memory behavior
+
+Memory is not a universal recovery tool. It enters the capability contract only
+when the user requests remembering/recalling, a live agent task explicitly
+requires prior durable state, or a configured product policy requests bounded
+context retrieval. Module readiness is checked before advertisement. A module
+load failure removes memory tools from the turn and emits one diagnostic event;
+it must not produce a failed Memory Recall card on unrelated conversations.
+
+#### Migration and rollout
+
+Add a core-owned configuration value:
+
+```text
+agent.orchestration_engine = "tinyagents" | "goose"
+```
+
+During development, default it to `tinyagents` for unrelated providers and
+force/opt in `goose` for the exact `lmstudio:qwen38-openhuman` route. Before
+release, make `goose` the primary interactive-chat default only after the full
+fixture matrix passes. Keep the TinyAgents path for rollback through one
+release; delete the Phase 2 lexical planner from the Goose path immediately so
+there is only one authoritative plan.
+
+Migration stages and gates:
+
+1. **Vendor and license gate** — pinned source, license/notice, dependency
+   audit, Windows compile, no runtime behavior change.
+2. **Adapter gate** — OpenHuman messages, tools, approvals, progress, usage,
+   cancellation, and persistence round-trip through the Goose state machine in
+   deterministic tests.
+3. **Mode gate** — direct chat bypass and `chat`/`assist`/`agent` resolution
+   pass fixtures without an LLM routing call.
+4. **Capability gate** — typed metadata, ordered routes, health filtering, and
+   monetary enforcement pass; paid tools are absent by default.
+5. **Qwen gate** — official-style transcript fixtures cover final text,
+   canonical calls, streamed calls, malformed calls, hidden reasoning,
+   correction, and resume.
+6. **Use-case gate** — news, known URL, image retrieval, image generation,
+   memory, repository edit, scheduling, failure fallback, and cancellation pass
+   end-to-end against mock tools.
+7. **Live gate** — the exact LM Studio route passes the required scenarios with
+   logs and no user-message trimming.
+8. **Release gate** — MSVC tests/build/package, diff and license review, clean
+   tree, committed and pushed branch, artifact hashes recorded.
+
+No later gate begins until the previous gate is reconciled against Git and its
+literal verification command succeeds.
+
+#### Required automated coverage
+
+At minimum, add deterministic tests for:
+
+- all mode resolution rules and explicit overrides;
+- zero tools and exactly one model call for ordinary chat;
+- descriptor availability, security ceiling, stable ordering, and duplicate
+  rejection;
+- paid managed search/media absent by default, present only with explicit
+  persisted opt-in, and impossible for the model to self-enable;
+- browser/direct-network/BYOK/managed ordering;
+- image retrieval never exposing generation;
+- generation never exposing retrieval as a fake substitute;
+- unhealthy memory never advertised or called;
+- each accepted tool call paired with exactly one result across interruption,
+  cancellation, and resume;
+- one-action-per-step for local Qwen;
+- malformed and raw-tag output correction/termination;
+- terminal route failure followed by an already-authorized free fallback;
+- no fallback crossing modality, permission, side-effect, or monetary
+  boundaries;
+- final-response completion after informational tools;
+- deterministic completion without a summarizer when bounded structured output
+  is already sufficient;
+- cumulative usage remaining distinct from current context occupancy;
+- the existing 131,072 alias and Windows module-loading regressions.
+
+Tests must use mock providers/tools and make no real backend or third-party
+requests.
+
+#### Live acceptance matrix
+
+Run each prompt in a fresh thread and record resolved mode, advertised ordered
+tools, calls, final state, latest-call context occupancy, cumulative traffic,
+wall time, and external endpoints contacted.
+
+1. `hey` — `chat`, one call, zero tools, final answer.
+2. `explain why the sky is blue` — `chat`, one call, zero tools.
+3. `show me the top three Google News headlines` — `assist`, non-metered route
+   unless metered search was explicitly enabled, sourced final answer, at most
+   three calls.
+4. supplied known URL — fetch first, bounded final answer.
+5. `get me a picture ... from the internet; don't generate` — retrieval only,
+   actual rendered result/source, no media generation.
+6. `generate a portrait` with no local generator and metered tools disabled —
+   zero paid requests and one clear unavailable response.
+7. same generation request with explicit metered opt-in and zero balance — one
+   request, route marked unavailable, one final actionable response.
+8. unrelated chat with failed memory module — no memory tool/card/error.
+9. explicit recall with failed memory module — one clear unavailable response.
+10. repository edit/test — `agent`, approved workspace tools, verified diff.
+11. malformed missing-name Qwen call — one correction maximum, no raw markup.
+12. interruption/resume — no duplicated side effect or orphaned tool result.
+
+For every scenario, logs must show context `131072`, no false 8K trim, no
+unapproved managed endpoint, and an explicit stop/yield reason.
+
+#### Build and release verification
+
+Use the repository's Microsoft MSVC build path. Required evidence:
+
+- focused Rust unit/integration suites;
+- frontend tests for mode/cost presentation if UI is changed;
+- formatting, changed-target clippy, typecheck, and repository architecture
+  checks;
+- release `OpenHuman.exe`, NSIS installer, and MSI;
+- exact absolute paths, sizes, and SHA-256 hashes;
+- clean `git status`, exact diff, commit IDs, and remote branch match;
+- live log excerpts for every acceptance claim.
+
+Do not ship a MinGW artifact or an executable missing its required DLLs.
+
+#### Definition of done
+
+Phase 7 is complete only when:
+
+- ordinary OpenHuman chat behaves like chat, not an autonomous agent;
+- assisted and agent turns run through the imported Goose state machine;
+- local Qwen uses the tested Qwen protocol adapter;
+- no metered search, media, or integration request can occur without explicit
+  user authorization;
+- capability availability and fallback order are executable typed data;
+- all acceptance scenarios pass in mocks and on the specified live route;
+- no raw tool markup, orphaned result, duplicate side effect, unrelated memory
+  failure, or false completion remains;
+- the Windows installer is rebuilt, installed/smoke-tested, committed, and
+  pushed with reproducible evidence.
+
+#### Explicit non-goals for Phase 7
+
+- changing the model, GGUF, quantization, chat template, llama.cpp flags,
+  endpoint, provider route, or 131,072 context;
+- importing Goose's UI, providers, commercial services, or tools;
+- silently enabling browser access to unrestricted domains;
+- adding a local image model when none is configured;
+- replacing OpenHuman's security, approval, persistence, or presentation
+  layers;
+- treating a larger prompt or more retries as an orchestration fix.
+
 ## Representative acceptance scenarios
 
 ### Conversation
@@ -490,7 +887,7 @@ Rollback is reverting authoritative relevance narrowing while retaining the
 correct 131,072 context resolver and Windows loader fix; the security ceiling
 continues to apply independently.
 
-## Explicit non-goals
+## Historical non-goals (Phases 0-6; superseded by Phase 7)
 
 - Replacing TinyAgents with Qwen-Agent, LangGraph, PydanticAI, or Smolagents.
 - Changing the model, endpoint, context length, chat template, or tool mode.
