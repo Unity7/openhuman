@@ -84,6 +84,16 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib capability_tests`;
   `git diff --check`.
 
+### G4-AX — capability Clippy canonicalization (wave 4.1, lane capability)
+
+- Depends: G4-A.
+- Change: `crates/openhuman-core/src/agent/primary_orchestration/capability.rs`.
+- Context: None.
+- Express backend/monetary compatibility with `matches!` so the repository's
+  `-D warnings` Clippy gate passes without changing the accepted pairs.
+- Verify: `cargo clippy --manifest-path Cargo.toml -p openhuman --lib -- -D warnings`;
+  `git diff --check`.
+
 ### G4-C — persisted metered opt-in (wave 4.0, lane configuration)
 
 - Depends: Gate 3.
