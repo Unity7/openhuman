@@ -427,15 +427,29 @@ fn repair_qwen_bare_name_tool_call(
         return response;
     }
     let text = response.text();
-    let Some(repaired) = repair_qwen_bare_name_text(&text, advertised_tools) else {
-        return response;
-    };
+    if let Some(repaired) = repair_qwen_bare_name_text(&text, advertised_tools) {
+        response
+            .message
+            .content
+            .retain(|block| !matches!(block, ContentBlock::Text(_)));
+        response.message.content.push(ContentBlock::Text(repaired));
+        response = tinyagents_harness::tool::apply_prompt_tool_calls(response);
+    }
+    if response.message.tool_calls.is_empty()
+        && response.text().trim_start().starts_with("<tool_call>")
+    {
+        // An invalid/unadvertised protocol frame is neither a user answer nor
+        // safe executable data. Do not leak internal markup into chat history.
+        response
+            .message
+            .content
+            .retain(|block| !matches!(block, ContentBlock::Text(_)));
+        response.message.content.push(ContentBlock::Text(
+            "I couldn't execute that action because the model returned an invalid tool call."
+                .to_string(),
+        ));
+    }
     response
-        .message
-        .content
-        .retain(|block| !matches!(block, ContentBlock::Text(_)));
-    response.message.content.push(ContentBlock::Text(repaired));
-    tinyagents_harness::tool::apply_prompt_tool_calls(response)
 }
 
 fn repair_qwen_bare_name_text(
@@ -454,7 +468,9 @@ fn repair_qwen_bare_name_text(
             return None;
         };
         let body = &after_open[..end];
-        if let Some(repaired) = repair_qwen_bare_name_body(body, advertised_tools) {
+        if let Some(repaired) = repair_qwen_bare_name_body(body, advertised_tools)
+            .or_else(|| repair_qwen_missing_name_body(body, advertised_tools))
+        {
             out.push_str(&repaired);
             changed = true;
         } else {
@@ -465,6 +481,45 @@ fn repair_qwen_bare_name_text(
     }
     out.push_str(rest);
     changed.then_some(out)
+}
+
+/// Recover a name-less Qwen call only when its arguments validate against one
+/// and only one advertised schema. This cannot widen the turn's allowlist and
+/// refuses ambiguous or destructive inference.
+fn repair_qwen_missing_name_body(
+    body: &str,
+    advertised_tools: &[tinyinference::tool::ToolSchema],
+) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    let arguments = object.get("arguments")?.as_object()?;
+    let arguments = serde_json::Value::Object(arguments.clone());
+    let mut matches = advertised_tools.iter().filter(|schema| {
+        // Never infer an acting tool. Name-less repair is limited to the
+        // read-only retrieval call observed from this model alias.
+        matches!(schema.name.as_str(), "web_fetch" | "browser_open")
+            && schema
+                .validate_call(&TaToolCall::new(
+                    "qwen-missing-name",
+                    &schema.name,
+                    arguments.clone(),
+                ))
+                .is_ok()
+    });
+    let schema = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(
+        serde_json::json!({
+            "name": schema.name,
+            "arguments": arguments,
+        })
+        .to_string(),
+    )
 }
 
 fn repair_qwen_bare_name_body(

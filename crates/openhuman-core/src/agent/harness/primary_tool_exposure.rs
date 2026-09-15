@@ -7,7 +7,35 @@ use tinyagents_harness::tool::{rank_tools_by_prompt, SelectableTool};
 use crate::tools::ToolSpec;
 
 const MAX_PROMPT_SELECTED_TOOLS: usize = 8;
-const RECOVERY_TOOLS: &[&str] = &["ask_user_clarification", "use_skill", "tool_search"];
+const RECOVERY_TOOLS: &[&str] = &[
+    "ask_user_clarification",
+    "use_skill",
+    "tool_search",
+    // The primary prompt's memory contract names this tool whenever the
+    // builder registered it. Keep the advertised and executable sets aligned;
+    // an unavailable module does not register the tool.
+    "memory_recall",
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PrimaryIntentFamily {
+    Conversation,
+    Web,
+    ImageRetrieval,
+    ImageGeneration,
+    Repository,
+    Memory,
+    Scheduling,
+    Planning,
+    Delegation,
+    Mixed,
+}
+
+#[derive(Debug)]
+pub(crate) struct PrimaryTurnContract {
+    pub(crate) intent_family: PrimaryIntentFamily,
+    pub(crate) allowed_tools: HashSet<String>,
+}
 
 /// Narrow an already-authorized tool surface for one primary-agent turn.
 ///
@@ -20,6 +48,15 @@ pub(crate) fn plan_primary_tool_exposure(
     ceiling: Option<&HashSet<String>>,
     state_required: &HashSet<String>,
 ) -> HashSet<String> {
+    plan_primary_turn_contract(prompt, candidates, ceiling, state_required).allowed_tools
+}
+
+pub(crate) fn plan_primary_turn_contract(
+    prompt: &str,
+    candidates: &[ToolSpec],
+    ceiling: Option<&HashSet<String>>,
+    state_required: &HashSet<String>,
+) -> PrimaryTurnContract {
     let authorized: Vec<&ToolSpec> = candidates
         .iter()
         .filter(|spec| ceiling.is_none_or(|allowed| allowed.contains(&spec.name)))
@@ -40,11 +77,21 @@ pub(crate) fn plan_primary_tool_exposure(
     }
 
     if prompt.trim().is_empty() {
-        return selected;
+        return PrimaryTurnContract {
+            intent_family: PrimaryIntentFamily::Conversation,
+            allowed_tools: selected,
+        };
     }
 
     let lowered = prompt.to_ascii_lowercase();
-    let families = matching_families(&lowered);
+    let intent_family = classify_primary_intent(&lowered);
+    if intent_family == PrimaryIntentFamily::ImageRetrieval {
+        // `use_skill` can delegate to the image-generation agent, which changes
+        // modality despite an explicit "from the internet / don't generate"
+        // request. Direct retrieval tools are sufficient for this contract.
+        selected.remove("use_skill");
+    }
+    let families = matching_families(&lowered, intent_family);
     let ordinary: Vec<&ToolSpec> = authorized
         .iter()
         .copied()
@@ -91,10 +138,87 @@ pub(crate) fn plan_primary_tool_exposure(
         }
     }
 
-    selected
+    PrimaryTurnContract {
+        intent_family,
+        allowed_tools: selected,
+    }
 }
 
-fn matching_families(prompt: &str) -> Vec<&'static [&'static str]> {
+fn classify_primary_intent(prompt: &str) -> PrimaryIntentFamily {
+    let has_image = ["image", "picture", "photo", "portrait", "pic"]
+        .iter()
+        .any(|word| contains_keyword(prompt, word));
+    let generation = ["generate", "create", "draw", "render", "synthesize"]
+        .iter()
+        .any(|word| contains_keyword(prompt, word));
+    let retrieval = [
+        "internet", "web", "online", "site", "website", "search", "find",
+    ]
+    .iter()
+    .any(|word| contains_keyword(prompt, word))
+        || prompt.contains("don't generate")
+        || prompt.contains("do not generate");
+    if has_image
+        && retrieval
+        && (!generation || prompt.contains("don't generate") || prompt.contains("do not generate"))
+    {
+        return PrimaryIntentFamily::ImageRetrieval;
+    }
+    if has_image && generation {
+        return PrimaryIntentFamily::ImageGeneration;
+    }
+
+    let matches = [
+        (
+            PrimaryIntentFamily::Web,
+            &[
+                "web", "internet", "online", "website", "url", "news", "headline", "google",
+            ][..],
+        ),
+        (
+            PrimaryIntentFamily::Repository,
+            &[
+                "repo",
+                "repository",
+                "code",
+                "file",
+                "readme",
+                "test",
+                "git",
+                "commit",
+                "build",
+            ][..],
+        ),
+        (
+            PrimaryIntentFamily::Memory,
+            &["remember", "recall", "memory"][..],
+        ),
+        (
+            PrimaryIntentFamily::Scheduling,
+            &["schedule", "remind", "calendar", "timer", "cron"][..],
+        ),
+        (PrimaryIntentFamily::Planning, &["plan", "todo"][..]),
+        (
+            PrimaryIntentFamily::Delegation,
+            &["delegate", "subagent", "sub-agent", "parallel agent"][..],
+        ),
+    ];
+    let found: Vec<_> = matches
+        .iter()
+        .filter(|(_, words)| words.iter().any(|word| contains_keyword(prompt, word)))
+        .map(|(family, _)| *family)
+        .collect();
+    match found.as_slice() {
+        [] => PrimaryIntentFamily::Conversation,
+        [family] => *family,
+        _ => PrimaryIntentFamily::Mixed,
+    }
+}
+
+fn matching_families(
+    prompt: &str,
+    intent_family: PrimaryIntentFamily,
+) -> Vec<&'static [&'static str]> {
     const WEB_WORDS: &[&str] = &[
         "web", "internet", "online", "website", "url", "news", "headline", "google",
     ];
@@ -126,7 +250,7 @@ fn matching_families(prompt: &str) -> Vec<&'static [&'static str]> {
         "workspace",
     ];
     const MEDIA_WORDS: &[&str] = &[
-        "image", "picture", "photo", "portrait", "video", "audio", "music",
+        "image", "picture", "photo", "portrait", "pic", "video", "audio", "music",
     ];
     const MEDIA_TOOLS: &[&str] = &["image", "video", "audio", "media"];
     const MEMORY_WORDS: &[&str] = &["remember", "recall", "memory"];
@@ -137,6 +261,13 @@ fn matching_families(prompt: &str) -> Vec<&'static [&'static str]> {
     const PLAN_TOOLS: &[&str] = &["plan", "todo", "task"];
     const DELEGATE_WORDS: &[&str] = &["delegate", "subagent", "sub-agent", "parallel agent"];
     const DELEGATE_TOOLS: &[&str] = &["subagent", "sub_agent", "agent", "delegate"];
+
+    if intent_family == PrimaryIntentFamily::ImageRetrieval {
+        return vec![WEB_TOOLS];
+    }
+    if intent_family == PrimaryIntentFamily::ImageGeneration {
+        return vec![MEDIA_TOOLS];
+    }
 
     let definitions: &[(&[&str], &[&str])] = &[
         (WEB_WORDS, WEB_TOOLS),
@@ -213,7 +344,7 @@ mod tests {
     #[test]
     fn conversational_prompt_exposes_only_recovery_tools() {
         let selected = plan_primary_tool_exposure("hey", &catalogue(), None, &HashSet::new());
-        assert_eq!(selected.len(), 3);
+        assert_eq!(selected.len(), RECOVERY_TOOLS.len());
         assert!(RECOVERY_TOOLS.iter().all(|name| selected.contains(*name)));
     }
 
@@ -237,6 +368,37 @@ mod tests {
         assert!(selected.contains("browser_open"));
         assert!(!selected.contains("file_read"));
         assert!(!selected.contains("image_generate"));
+    }
+
+    #[test]
+    fn image_retrieval_does_not_expose_generation_tools() {
+        let contract = plan_primary_turn_contract(
+            "get me a pic from the internet; don't generate a pic",
+            &catalogue(),
+            None,
+            &HashSet::new(),
+        );
+        assert_eq!(contract.intent_family, PrimaryIntentFamily::ImageRetrieval);
+        assert!(contract.allowed_tools.contains("web_fetch"));
+        assert!(contract.allowed_tools.contains("browser_open"));
+        assert!(!contract.allowed_tools.contains("image_generate"));
+        assert!(!contract.allowed_tools.contains("use_skill"));
+    }
+
+    #[test]
+    fn image_generation_does_not_implicitly_expose_web_tools() {
+        let contract =
+            plan_primary_turn_contract("generate a portrait", &catalogue(), None, &HashSet::new());
+        assert_eq!(contract.intent_family, PrimaryIntentFamily::ImageGeneration);
+        assert!(contract.allowed_tools.contains("image_generate"));
+        assert!(!contract.allowed_tools.contains("web_fetch"));
+        assert!(!contract.allowed_tools.contains("browser_open"));
+    }
+
+    #[test]
+    fn registered_memory_recall_stays_in_prompt_execution_contract() {
+        let selected = plan_primary_tool_exposure("hey", &catalogue(), None, &HashSet::new());
+        assert!(selected.contains("memory_recall"));
     }
 
     #[test]

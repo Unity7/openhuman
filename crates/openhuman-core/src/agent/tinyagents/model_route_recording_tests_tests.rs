@@ -135,6 +135,18 @@ fn tool_schema(name: &str) -> tinyinference::tool::ToolSchema {
     }
 }
 
+fn url_tool_schema(name: &str) -> tinyinference::tool::ToolSchema {
+    tinyinference::tool::ToolSchema::new(
+        name,
+        "",
+        serde_json::json!({
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"]
+        }),
+    )
+}
+
 #[test]
 fn qwen_bare_name_repair_accepts_an_advertised_tool() {
     let response = repair_qwen_bare_name_tool_call(
@@ -162,5 +174,43 @@ fn qwen_bare_name_repair_rejects_an_unadvertised_tool() {
     );
 
     assert!(response.tool_calls().is_empty());
-    assert_eq!(response.text(), text);
+    assert!(!response.text().contains("<tool_call>"));
+    assert!(response.text().contains("invalid tool call"));
+}
+
+#[test]
+fn qwen_missing_name_repair_accepts_one_schema_valid_read_only_tool() {
+    let response = repair_qwen_bare_name_tool_call(
+        ModelResponse::assistant(
+            r#"<tool_call>{"arguments":{"url":"https://example.com"}}</tool_call>"#,
+        ),
+        &[url_tool_schema("web_fetch"), tool_schema("web_search_tool")],
+    );
+
+    assert_eq!(response.text(), "");
+    assert_eq!(response.tool_calls().len(), 1);
+    assert_eq!(response.tool_calls()[0].name, "web_fetch");
+}
+
+#[test]
+fn qwen_missing_name_repair_rejects_ambiguous_or_acting_tools() {
+    let text = r#"<tool_call>{"arguments":{"url":"https://example.com"}}</tool_call>"#;
+    let ambiguous = repair_qwen_bare_name_tool_call(
+        ModelResponse::assistant(text),
+        &[
+            url_tool_schema("web_fetch"),
+            url_tool_schema("browser_open"),
+        ],
+    );
+    assert!(ambiguous.tool_calls().is_empty());
+    assert!(!ambiguous.text().contains("<tool_call>"));
+    assert!(ambiguous.text().contains("invalid tool call"));
+
+    let acting = repair_qwen_bare_name_tool_call(
+        ModelResponse::assistant(text),
+        &[url_tool_schema("shell")],
+    );
+    assert!(acting.tool_calls().is_empty());
+    assert!(!acting.text().contains("<tool_call>"));
+    assert!(acting.text().contains("invalid tool call"));
 }
