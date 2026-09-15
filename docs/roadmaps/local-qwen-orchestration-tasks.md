@@ -107,15 +107,38 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib apply_agent_settings`;
   `git diff --check`.
 
-### G4-E — metered setting RPC schema (wave 4.2, lane configuration)
+### G4-DX — setting-patch literal compatibility (wave 4.2, lane tests)
 
 - Depends: G4-D.
+- Change: `crates/openhuman-core/src/config/ops_agent_paths_tests.rs`.
+- Context: `crates/openhuman-core/src/config/ops/agent.rs`.
+- Update the two timeout-only `AgentSettingsPatch` literals to use the default
+  for newly added optional settings without changing their assertions.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib ops_agent_paths_tests`;
+  `git diff --check`.
+
+### G4-E1 — metered setting RPC wire (wave 4.2, lane configuration)
+
+- Depends: G4-D, G4-DX.
 - Change: `crates/openhuman-core/src/config/schemas/controllers/agent.rs`;
-  `crates/openhuman-core/src/config/schemas/schema_defs/agent.rs`.
+  `crates/openhuman-core/src/config/schemas/helpers.rs`.
 - Context: `crates/openhuman-core/src/config/ops/agent.rs`;
+  `crates/openhuman-core/src/config/schemas/controllers_tests.rs`.
+- Deserialize optional `allow_metered_agent_tools` and forward it mechanically
+  to the settings patch. Non-booleans remain on the existing structured
+  invalid-params path.
+- Verify: `cargo check --manifest-path Cargo.toml -p openhuman --lib`;
+  `git diff --check`.
+
+### G4-E2 — metered setting RPC schema (wave 4.3, lane configuration)
+
+- Depends: G4-E1.
+- Change: `crates/openhuman-core/src/config/schemas/schema_defs/agent.rs`;
   `crates/openhuman-core/src/config/schemas_tests.rs`.
-- Parse and document optional `allow_metered_agent_tools`; reject non-booleans
-  through the existing structured invalid-params path.
+- Context: `crates/openhuman-core/src/config/schemas/helpers.rs`;
+  `crates/openhuman-core/src/config/ops/agent.rs`.
+- Document optional `allow_metered_agent_tools`, including the persisted
+  opt-in and sign-in boundary, and assert its optional boolean schema.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib config::schemas`;
   `git diff --check`.
 
@@ -247,7 +270,7 @@ shared module file run only after the preceding integration commit.
 
 ### G4-O — primary-turn capability integration (wave 4.6, lane integration)
 
-- Depends: G4-E, G4-F, G4-L, G4-M.
+- Depends: G4-E2, G4-F, G4-L, G4-M.
 - Change: `crates/openhuman-core/src/agent/harness/session/runtime/primary_turn.rs`;
   `crates/openhuman-core/src/web_chat/run_task.rs`.
 - Context: `crates/openhuman-core/src/agent/harness/session/types.rs`;
