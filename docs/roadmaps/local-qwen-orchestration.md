@@ -4,6 +4,7 @@ Status: active
 Owner: OpenHuman host integration
 Branch: `fix/local-qwen-history`
 Baseline: `c49bfeecd5406d87c3727f744fcb988217c8dccd`
+Current implementation head: `f6504d24248d85d837b13ae47c985022ab760257`
 
 ## Objective
 
@@ -76,6 +77,29 @@ The production path becomes:
 6. Load detailed skill instructions and packed tool schemas only after the
    model chooses `use_skill`.
 7. Return bounded tool results and stop on terminal failures.
+
+## Reference architecture sources
+
+This roadmap borrows established behavior instead of introducing a new agent
+framework:
+
+- Qwen-Agent is the compatibility oracle for Qwen function schemas, canonical
+  `{name, arguments}` calls, ordered tool results, and multi-step/parallel
+  calls: <https://github.com/QwenLM/Qwen-Agent>.
+- goose is the reference for a small provider-independent Rust execution loop
+  that surfaces tool errors, revises context, and continues until a final model
+  response: <https://github.com/aaif-goose/goose/blob/main/documentation/docs/goose-architecture/goose-architecture.md>.
+- AnythingLLM is the reference for selecting a small relevant tool set before
+  inference: <https://github.com/Mintplex-Labs/anything-llm-docs/blob/main/pages/agent/setup.mdx>.
+- LangGraph is the reference for explicit state transitions, durable state,
+  and idempotent re-execution: <https://langchain-ai.github.io/langgraph/reference/>.
+- AutoGen is the reference for explicit success, failure, timeout, usage, and
+  handoff termination conditions:
+  <https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/termination.html>.
+
+Only OpenHuman-specific policy is implemented locally: mapping an authorized
+user intent and runtime state to OpenHuman tool capabilities, failure classes,
+fallbacks, and completion conditions.
 
 ## Exposure policy
 
@@ -225,6 +249,184 @@ headroom.
 - [x] Review the exact diff, commit, push, and record artifact hashes/paths.
 
 Gate: all acceptance criteria pass and the source tree is clean.
+
+### Phase 6: contract-driven Qwen orchestration (next build)
+
+The Phase 5 live gate is reopened. Live testing after
+`f6504d24248d85d837b13ae47c985022ab760257` found four contract violations:
+
+- an image-retrieval request was routed to image generation instead of search;
+- `spawn_async_subagent` instructed the model to call `wait_subagent`, although
+  that tool was not callable by the parent;
+- a later parent turn instructed Qwen to call `memory_recall`, although the
+  live allowlist omitted it;
+- Qwen emitted `<tool_call>{"arguments":{"url":...}}</tool_call>` without a
+  tool name, which was rendered to the user instead of being executed or
+  corrected.
+
+#### Single orchestration contract
+
+Add one immutable per-turn contract derived from the already-authorized tool
+ceiling. It must be the sole input to:
+
+1. prompt capability instructions;
+2. advertised model tool schemas;
+3. execution-time allowlist enforcement;
+4. retry/fallback behavior; and
+5. completion validation.
+
+The contract contains:
+
+- `intent_family`: conversation, web/news, image retrieval, image generation,
+  repository, memory, scheduling, or delegation;
+- `allowed_tools`: stable ordered names intersected with the security ceiling;
+- `required_state_tools`: tools justified by live goal, memory, approval, or
+  child-agent state;
+- `fallbacks`: ordered alternatives that do not change modality or paid/local
+  boundaries without user authorization;
+- `terminal_failures`: typed failures that cannot improve during this run;
+- `completion`: final text, explicit handoff, or one actionable terminal error;
+- `limits`: maximum calls, identical retries, result bytes, and correction
+  attempts.
+
+Prompt text must be generated from this contract. A tool absent from
+`allowed_tools` must not be named as an instruction, advertised to the model,
+or accepted for execution. This invariant is checked immediately before every
+model call and every tool call.
+
+#### Intent and capability rules
+
+| Intent | Allowed capability | Forbidden implicit fallback | Completion |
+| --- | --- | --- | --- |
+| `find/show/get an image from the internet` | web/image search and retrieval | image generation | retrieved result or clear retrieval failure |
+| `generate/create/draw an image` | image generation | paid web/media service not already authorized | generated artifact or one actionable failure |
+| current news/web lookup | search then fetch | workspace, memory, media, delegation | bounded sourced answer |
+| memory request | memory only when module health and access allow it | pretending recall occurred | recalled result or clear unavailable state |
+| repository work | workspace/read/edit/shell under existing policy | web/media unless explicitly requested | verified change or blocker |
+| delegated work | spawn/continue and automatic result delivery | unavailable polling tool | delivered result or terminal child failure |
+
+Follow-up turns such as `try a different site` inherit the active intent family
+but not stale tool results, failed provider choices, or hidden capabilities.
+
+#### Qwen protocol boundary
+
+Prefer native structured provider `tool_calls`. For prompt-guided text calls,
+apply Qwen-Agent-compatible parsing only after the complete stream is assembled.
+
+- Accept canonical `{ "name": string, "arguments": object }` calls.
+- Retain the current narrow bare-name repair for `qwen38-openhuman`.
+- A missing name may be inferred only when exactly one allowed tool matches the
+  intent family and validates the argument object against its schema.
+- Otherwise return one bounded validation correction to the model. A second
+  invalid call ends with one clear error.
+- Never execute an unadvertised tool, invent missing arguments, or infer a
+  destructive tool.
+- Never persist or render raw `<tool_call>` markup as assistant text.
+- Preserve call IDs, call order, reasoning metadata required by the provider,
+  and one result for every accepted call.
+
+Tool-call dialect parsing remains owned by TinyAgents. OpenHuman supplies the
+turn contract, authorized schemas, and model-specific compatibility decision;
+it must not grow a second general parser or agent loop.
+
+#### Lifecycle and failure rules
+
+- `spawn_async_subagent` must not instruct the parent to call a tool outside
+  its contract. Use the existing automatic result-delivery path; expose a wait
+  tool only if it becomes an explicit, state-required capability.
+- Memory instructions are emitted only when `memory_recall` is callable. A
+  failed or unloaded memory module produces one typed unavailable result.
+- Terminal billing, quota, authentication, configuration, and unsupported
+  capability failures propagate across parent and child boundaries and stop
+  that failing route after one attempt.
+- Retry only typed transient failures. At most one retry is allowed unless the
+  tool supplies explicit retry guidance.
+- A successful non-terminal tool result returns to the model for a final
+  response. A turn may not finish with only a URL, raw call, or internal status.
+- Web/RSS/HTML results receive a deterministic byte/item cap before optional
+  model summarization. Summarizer failure falls back to bounded parsed content,
+  never the complete raw document.
+- Side-effecting calls carry a stable idempotency key for the turn and call so
+  stream replay or resume cannot duplicate the action.
+
+#### Ownership scope
+
+Expected OpenHuman touch points are limited to:
+
+- `crates/openhuman-core/src/agent/harness/primary_tool_exposure.rs` for intent
+  families and authorized tool selection;
+- `crates/openhuman-core/src/agent/harness/session/turn/graph.rs` for live
+  state-required capabilities and the per-turn contract;
+- `crates/openhuman-core/src/agent/tinyagents/middleware/tool_exposure.rs` for
+  prompt/advertisement/execution parity;
+- `crates/openhuman-core/src/agent/orchestration/tools/spawn_async_subagent.rs`
+  for truthful async lifecycle instructions;
+- `crates/openhuman-core/src/agent/tinyagents/middleware/loop_guards.rs` and
+  `repeated_failure.rs` for typed parent/child failure propagation;
+- the existing TinyAgents tool-call adapter seam for bounded Qwen correction;
+- existing tool-result artifact/context code for deterministic result limits.
+
+No frontend policy, second tool registry, Python sidecar, new agent framework,
+or provider-specific copy of OpenHuman's security rules is in scope.
+
+#### Delivery order and gates
+
+1. **Contract parity:** create the per-turn contract and prove prompt,
+   advertisement, and execution contain the same tool names.
+2. **Intent routing:** separate image retrieval from generation and make
+   follow-up intent inheritance explicit.
+3. **Protocol recovery:** handle canonical, safely inferable, ambiguous,
+   unadvertised, malformed, streamed, and parallel Qwen calls.
+4. **Lifecycle:** remove unavailable async instructions, gate memory on health,
+   propagate terminal child failures, and enforce final-response completion.
+5. **Result control:** bound web/media results and provide a non-LLM fallback
+   when summarization fails.
+6. **Release:** run focused suites, live scenarios, MSVC packaging, exact diff
+   review, clean-tree verification, and publish artifact paths/hashes.
+
+Each gate must pass before the next behavior is integrated. Existing context,
+Windows loading, approval, sandbox, and security regressions remain required.
+
+#### Phase 6 acceptance scenarios
+
+- `hey`: one final response, no ordinary task tool, no raw protocol markup.
+- `show me the top three Google News headlines`: web-only route, at most three
+  primary calls, bounded results, three sourced headlines, and final text.
+- `get me a pic of a blonde Asian woman from the internet; don't generate`:
+  retrieval tools only, no image agent or generation call, and a returned
+  result rather than a bare URL/tool call.
+- `try a different site`: preserves image-retrieval intent and excludes the
+  previously failed source without switching modalities.
+- `generate a portrait ...` with `Insufficient balance`: exactly one media
+  attempt and one actionable final response.
+- memory enabled and healthy: `memory_recall` is both advertised and callable;
+  memory unavailable: it is neither instructed nor advertised and no
+  `not on the allowlist` failure occurs.
+- async delegation: no unavailable `wait_subagent` instruction or call; child
+  completion is delivered once.
+- missing-name Qwen call: execute only when schema/intent matching yields one
+  safe candidate; otherwise perform one correction and finish clearly.
+- malformed, partial, or unclosed streamed call: no execution and no raw tag
+  appears in persisted history or the UI.
+
+#### Phase 6 measurable release criteria
+
+- zero prompt/advertisement/allowlist name mismatches in unit and live logs;
+- zero raw `<tool_call>` leaks across the fixture suite;
+- zero retries after a terminal failure;
+- no more than one correction attempt for an invalid model call;
+- one execution per accepted call ID, including resume/replay tests;
+- greeting: one primary call; news and image retrieval: at most three primary
+  calls; media quota failure: one media call;
+- no user-message trim in the representative scenarios;
+- the existing 20,000/24,000 first-call input targets remain satisfied;
+- Windows executable, NSIS, and MSI build through the repository's MSVC path;
+- live logs show model context `131072`, selected intent/tool names, typed stop
+  reason, final-response completion, and no false 8K budgeting.
+
+Gate: every Phase 6 scenario passes against deterministic fixtures and the live
+`lmstudio:qwen38-openhuman` route, all relevant existing tests remain green,
+the exact diff is reviewed, and the source tree is clean.
 
 ## Representative acceptance scenarios
 
