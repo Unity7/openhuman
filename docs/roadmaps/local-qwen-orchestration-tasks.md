@@ -299,6 +299,17 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose::tests`;
   `git diff --check`.
 
+### G4-NX — Goose rejection observation assertions (wave 4.6, lane Goose)
+
+- Depends: G4-N.
+- Change: `crates/openhuman-core/src/agent/goose/tests.rs`.
+- Context: `crates/openhuman-core/src/agent/goose/tools.rs`.
+- Assert omitted and unplanned calls through Goose's durable failed-observation
+  result rather than expecting the state-machine run itself to fail. Preserve
+  zero authorization and zero execution assertions.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose::tests`;
+  `git diff --check`.
+
 ### G4-O — primary-turn capability integration (wave 4.6, lane integration)
 
 - Depends: G4-E2, G4-F, G4-L, G4-MX.
@@ -316,7 +327,7 @@ shared module file run only after the preceding integration commit.
 
 ### G4-P — Gate 4 integration fixtures (wave 4.7, lane acceptance)
 
-- Depends: G4-N, G4-O.
+- Depends: G4-NX, G4-O.
 - Change: `crates/openhuman-core/src/agent/primary_orchestration/gate4_tests.rs`;
   `crates/openhuman-core/src/agent/primary_orchestration/mod.rs`.
 - Context: `crates/openhuman-core/src/agent/primary_orchestration/planner.rs`;
