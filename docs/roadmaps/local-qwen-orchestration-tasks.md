@@ -275,9 +275,20 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose::tests`;
   `git diff --check`.
 
-### G4-N — Goose registry enforcement tests (wave 4.6, lane Goose)
+### G4-MX — Goose registry compile seam (wave 4.5, lane integration)
 
 - Depends: G4-M.
+- Change: `crates/openhuman-core/src/agent/harness/session/runtime/primary_turn.rs`.
+- Context: `crates/openhuman-core/src/agent/goose/runner.rs`.
+- Update the dormant fail-closed Goose adapter construction for the ordered
+  registry fields introduced by G4-M. Keep both tool snapshots and routes empty;
+  G4-O remains responsible for building the real immutable capability plan.
+- Verify: `cargo check --manifest-path Cargo.toml -p openhuman --lib`;
+  `git diff --check`.
+
+### G4-N — Goose registry enforcement tests (wave 4.6, lane Goose)
+
+- Depends: G4-MX.
 - Change: `crates/openhuman-core/src/agent/goose/tests.rs`.
 - Context: `crates/openhuman-core/src/agent/goose/tools.rs`;
   `crates/openhuman-core/src/agent/goose/runner.rs`;
@@ -290,7 +301,7 @@ shared module file run only after the preceding integration commit.
 
 ### G4-O — primary-turn capability integration (wave 4.6, lane integration)
 
-- Depends: G4-E2, G4-F, G4-L, G4-M.
+- Depends: G4-E2, G4-F, G4-L, G4-MX.
 - Change: `crates/openhuman-core/src/agent/harness/session/runtime/primary_turn.rs`;
   `crates/openhuman-core/src/web_chat/run_task.rs`.
 - Context: `crates/openhuman-core/src/agent/harness/session/types.rs`;
