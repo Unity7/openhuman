@@ -67,6 +67,10 @@ pub fn schemas(function: &str) -> ControllerSchema {
                     "queue_mode",
                     "Queue mode: 'interrupt' (default), 'steer', 'followup', 'collect', or 'parallel'.",
                 ),
+                optional_string(
+                    "turn_mode",
+                    "Optional primary execution-mode override: 'chat', 'assist', or 'agent'.",
+                ),
             ],
             outputs: vec![json_output("ack", "Acceptance payload.")],
         },
@@ -133,6 +137,7 @@ fn handle_chat(params: Map<String, Value>) -> ControllerFuture {
                     // Attribution is stamped later by run_chat_task once the
                     // target agent is resolved.
                     agent_id: None,
+                    turn_mode_override: p.turn_mode,
                 },
             )
             .await?,

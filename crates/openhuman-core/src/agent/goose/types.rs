@@ -51,13 +51,37 @@ impl GooseCheckpoint {
             usage: GooseUsage::default(),
         }
     }
+
+    /// Whether the persisted machine is waiting for another pass rather than
+    /// holding a terminal assistant answer.
+    pub fn is_resumable(&self) -> bool {
+        self.conversation.last().is_some_and(|message| {
+            matches!(
+                goose_provider_types::conversation::effective_role(message),
+                goose_provider_types::conversation::EffectiveRole::User
+                    | goose_provider_types::conversation::EffectiveRole::Tool
+            )
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GooseStopReason {
     FinalAnswer,
     Cancelled,
+    CallCeiling,
     Yielded,
+}
+
+impl GooseStopReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FinalAnswer => "final_answer",
+            Self::Cancelled => "cancelled",
+            Self::CallCeiling => "call_ceiling",
+            Self::Yielded => "yielded",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

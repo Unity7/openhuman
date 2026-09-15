@@ -12,7 +12,7 @@ mod tools;
 mod types;
 
 pub use runner::GooseTurnAdapter;
-pub use store::{GooseCheckpointStore, InMemoryGooseCheckpointStore};
+pub use store::{FileGooseCheckpointStore, GooseCheckpointStore, InMemoryGooseCheckpointStore};
 pub use tools::GooseToolSecurity;
 pub use types::{
     AcceptedToolAction, GooseCheckpoint, GooseStopReason, GooseTurnOutcome, GooseUsage,

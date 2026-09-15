@@ -148,6 +148,7 @@ fn adapter(
         progress,
         cancel,
         max_output_tokens: Some(64),
+        max_primary_calls: 12,
     }
 }
 
@@ -239,6 +240,34 @@ async fn state_machine_persists_action_before_execution_and_one_observation() {
     .await
     .unwrap();
     assert_eq!(resumed.stop_reason, GooseStopReason::FinalAnswer);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn primary_call_ceiling_yields_a_resumable_checkpoint() {
+    let store = Arc::new(InMemoryGooseCheckpointStore::default());
+    store.insert(
+        "ceiling",
+        GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+    );
+    let model = Arc::new(ScriptedModel::new(vec![tool_response(Usage::new(10, 2))]));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut bounded = adapter(
+        store,
+        model.clone(),
+        calls.clone(),
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    );
+    bounded.max_primary_calls = 1;
+
+    let outcome = bounded.run("ceiling").await.unwrap();
+
+    assert_eq!(outcome.stop_reason, GooseStopReason::CallCeiling);
+    assert_eq!(outcome.checkpoint.usage.primary_calls, 1);
+    assert!(outcome.checkpoint.is_resumable());
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 

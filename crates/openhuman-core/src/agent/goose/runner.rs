@@ -80,6 +80,29 @@ impl Operation<GooseSession, OpenHumanEffect> for CancellationObservation {
     }
 }
 
+struct PrimaryCallCeiling {
+    max_primary_calls: u32,
+}
+
+#[async_trait]
+impl Operation<GooseSession, OpenHumanEffect> for PrimaryCallCeiling {
+    fn name(&self) -> &'static str {
+        "openhuman_primary_call_ceiling"
+    }
+
+    async fn run(
+        &self,
+        session: &GooseSession,
+        _conversation: &Conversation,
+        _emit: &Emitter,
+    ) -> Result<OperationResult<OpenHumanEffect>> {
+        if session.checkpoint.usage.primary_calls >= self.max_primary_calls {
+            return goose_agent::operation::yielded();
+        }
+        not_applicable()
+    }
+}
+
 /// Direct adapter around the vendored `goose_agent::machine::StateMachine`.
 /// It is dormant until a later gate selects it for a primary turn, so the
 /// existing TinyAgents dispatch path remains unchanged.
@@ -93,6 +116,7 @@ pub struct GooseTurnAdapter {
     pub progress: Option<tokio::sync::mpsc::Sender<AgentProgress>>,
     pub cancel: CancellationToken,
     pub max_output_tokens: Option<u32>,
+    pub max_primary_calls: u32,
 }
 
 impl GooseTurnAdapter {
@@ -131,6 +155,9 @@ impl GooseTurnAdapter {
             vec![
                 Step::Operation(Arc::new(CancellationObservation)),
                 Step::Operation(Arc::new(tools)),
+                Step::Operation(Arc::new(PrimaryCallCeiling {
+                    max_primary_calls: self.max_primary_calls,
+                })),
                 Step::Inference(Arc::new(inference)),
             ],
             self.cancel.clone(),
@@ -150,6 +177,8 @@ impl GooseTurnAdapter {
             GooseStopReason::Cancelled
         } else if final_answer.is_some() {
             GooseStopReason::FinalAnswer
+        } else if session.checkpoint.usage.primary_calls >= self.max_primary_calls {
+            GooseStopReason::CallCeiling
         } else {
             GooseStopReason::Yielded
         };

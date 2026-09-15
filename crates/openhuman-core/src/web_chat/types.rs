@@ -102,6 +102,9 @@ pub struct ChatRequestMetadata {
     /// is resolved — used purely for trace attribution (Langfuse `agent.id` /
     /// `agent.turn:<id>` trace name), never for routing.
     pub agent_id: Option<String>,
+    /// Optional explicit primary-turn mode.  No UI control is required for the
+    /// Phase 7 rollout, but the request architecture accepts the override now.
+    pub turn_mode_override: Option<crate::agent::primary_orchestration::PrimaryTurnMode>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +137,9 @@ pub(crate) struct WebChatParams {
     /// `followup`, or `collect`.
     #[serde(default)]
     pub(super) queue_mode: Option<String>,
+    /// Optional explicit execution mode: `chat`, `assist`, or `agent`.
+    #[serde(default)]
+    pub(super) turn_mode: Option<crate::agent::primary_orchestration::PrimaryTurnMode>,
 }
 
 #[derive(Debug, Deserialize)]

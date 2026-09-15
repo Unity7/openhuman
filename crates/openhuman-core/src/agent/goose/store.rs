@@ -1,6 +1,9 @@
 use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
+    collections::{BTreeSet, HashMap, HashSet},
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -10,6 +13,9 @@ use goose_agent::{
     operation::ConversationEffect,
 };
 use goose_provider_types::conversation::message::MessageContent;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tempfile::NamedTempFile;
 
 use super::types::{
     AcceptedToolAction, GooseCheckpoint, GooseSession, OpenHumanEffect, ToolObservation,
@@ -48,6 +54,17 @@ impl InMemoryGooseCheckpointStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(session_id.into(), checkpoint);
+    }
+
+    pub fn remove(&self, session_id: &str) {
+        self.checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(session_id);
+        self.execution_claims
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|(stored_session, _)| stored_session != session_id);
     }
 }
 
@@ -91,6 +108,141 @@ impl GooseCheckpointStore for InMemoryGooseCheckpointStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert((session_id.to_string(), call_id.to_string())))
+    }
+}
+
+/// On-disk primary-turn checkpoint store.
+///
+/// Checkpoints and execution claims share one atomically replaced document so
+/// an app restart cannot forget that an accepted effect already began. The
+/// process-wide lock serializes the read/compare/write transaction across all
+/// handles; the desktop owns a single core process, so no cross-process writer
+/// is expected.
+pub struct FileGooseCheckpointStore {
+    root: PathBuf,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PersistedGooseSession {
+    checkpoint: GooseCheckpoint,
+    #[serde(default)]
+    execution_claims: BTreeSet<String>,
+}
+
+static FILE_CHECKPOINT_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+impl FileGooseCheckpointStore {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    fn path(&self, session_id: &str) -> PathBuf {
+        let digest = Sha256::digest(session_id.as_bytes());
+        let stem = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        self.root.join(format!("{stem}.json"))
+    }
+
+    fn read_locked(&self, session_id: &str) -> Result<PersistedGooseSession> {
+        let path = self.path(session_id);
+        let bytes =
+            fs::read(&path).with_context(|| format!("read Goose checkpoint {}", path.display()))?;
+        serde_json::from_slice(&bytes)
+            .with_context(|| format!("decode Goose checkpoint {}", path.display()))
+    }
+
+    fn write_locked(&self, session_id: &str, value: &PersistedGooseSession) -> Result<()> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("create Goose checkpoint dir {}", self.root.display()))?;
+        let bytes = serde_json::to_vec_pretty(value).context("encode Goose checkpoint")?;
+        let mut temp = NamedTempFile::new_in(&self.root)
+            .with_context(|| format!("stage Goose checkpoint in {}", self.root.display()))?;
+        temp.write_all(&bytes).context("write Goose checkpoint")?;
+        temp.as_file()
+            .sync_all()
+            .context("fsync Goose checkpoint")?;
+        let path = self.path(session_id);
+        temp.persist(&path)
+            .map_err(|error| error.error)
+            .with_context(|| format!("replace Goose checkpoint {}", path.display()))?;
+        sync_dir(&self.root);
+        Ok(())
+    }
+
+    pub fn insert(&self, session_id: &str, checkpoint: GooseCheckpoint) -> Result<()> {
+        let _guard = FILE_CHECKPOINT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.write_locked(
+            session_id,
+            &PersistedGooseSession {
+                checkpoint,
+                execution_claims: BTreeSet::new(),
+            },
+        )
+    }
+
+    pub fn remove(&self, session_id: &str) -> Result<bool> {
+        let _guard = FILE_CHECKPOINT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let path = self.path(session_id);
+        if !path.exists() {
+            return Ok(false);
+        }
+        fs::remove_file(&path)
+            .with_context(|| format!("remove Goose checkpoint {}", path.display()))?;
+        Ok(true)
+    }
+}
+
+#[async_trait]
+impl GooseCheckpointStore for FileGooseCheckpointStore {
+    async fn load(&self, session_id: &str) -> Result<GooseCheckpoint> {
+        let _guard = FILE_CHECKPOINT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(self.read_locked(session_id)?.checkpoint)
+    }
+
+    async fn compare_and_swap(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        checkpoint: GooseCheckpoint,
+    ) -> Result<()> {
+        let _guard = FILE_CHECKPOINT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut persisted = self.read_locked(session_id)?;
+        if persisted.checkpoint.revision != expected_revision {
+            return Err(anyhow!(
+                "stale Goose checkpoint: expected revision {expected_revision}, found {}",
+                persisted.checkpoint.revision
+            ));
+        }
+        persisted.checkpoint = checkpoint;
+        self.write_locked(session_id, &persisted)
+    }
+
+    async fn claim_execution(&self, session_id: &str, call_id: &str) -> Result<bool> {
+        let _guard = FILE_CHECKPOINT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut persisted = self.read_locked(session_id)?;
+        if !persisted.execution_claims.insert(call_id.to_string()) {
+            return Ok(false);
+        }
+        self.write_locked(session_id, &persisted)?;
+        Ok(true)
+    }
+}
+
+fn sync_dir(path: &Path) {
+    if let Ok(dir) = fs::File::open(path) {
+        let _ = dir.sync_all();
     }
 }
 
