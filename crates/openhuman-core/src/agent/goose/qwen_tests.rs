@@ -1,4 +1,7 @@
-use crate::agent::goose::qwen::{normalize_qwen_response, QwenInvalidCall};
+use crate::agent::goose::qwen::{
+    build_protocol_correction_prompt, is_local_qwen_route, normalize_qwen_response,
+    protocol_failure_terminal_answer, QwenInvalidCall,
+};
 use tinyinference::{
     message::{AssistantMessage, ContentBlock},
     model::{ModelResolutionSource, ModelResponse, ResolvedModel},
@@ -675,4 +678,107 @@ fn test_response_metadata_and_usage_preserved() {
         normalized_call.finish_reason,
         Some("tool_calls".to_string())
     );
+}
+
+#[test]
+fn test_is_local_qwen_route_exact_case_sensitive_boundary() {
+    // True only for exact case-sensitive "lmstudio" + "qwen38-openhuman"
+    assert!(is_local_qwen_route("lmstudio", "qwen38-openhuman"));
+
+    // Case variations must be false
+    assert!(!is_local_qwen_route("LMStudio", "qwen38-openhuman"));
+    assert!(!is_local_qwen_route("Lmstudio", "qwen38-openhuman"));
+    assert!(!is_local_qwen_route("lmstudio", "Qwen38-openhuman"));
+    assert!(!is_local_qwen_route("lmstudio", "QWEN38-OPENHUMAN"));
+    assert!(!is_local_qwen_route("LMSTUDIO", "qwen38-openhuman"));
+    assert!(!is_local_qwen_route("LMSTUDIO", "QWEN38-OPENHUMAN"));
+
+    // Near/similar pairs must be false
+    assert!(!is_local_qwen_route("lm_studio", "qwen38-openhuman"));
+    assert!(!is_local_qwen_route("lmstudio", "qwen38_openhuman"));
+    assert!(!is_local_qwen_route("lmstudio", "qwen38-openhuman-v2"));
+    assert!(!is_local_qwen_route("lmstudio", "qwen-38-openhuman"));
+    assert!(!is_local_qwen_route("lmstudio", "qwen38"));
+    assert!(!is_local_qwen_route("lmstudio", "qwen-2.5-coder-32b"));
+    assert!(!is_local_qwen_route("lmstudio ", "qwen38-openhuman"));
+    assert!(!is_local_qwen_route("lmstudio", " qwen38-openhuman"));
+    assert!(!is_local_qwen_route("lmstudio", "qwen38-openhuman "));
+
+    // Other providers/models must be false
+    assert!(!is_local_qwen_route("ollama", "qwen38-openhuman"));
+    assert!(!is_local_qwen_route("openai", "gpt-4o"));
+    assert!(!is_local_qwen_route("anthropic", "claude-3-5-sonnet"));
+    assert!(!is_local_qwen_route("", ""));
+    assert!(!is_local_qwen_route("lmstudio", ""));
+    assert!(!is_local_qwen_route("", "qwen38-openhuman"));
+}
+
+#[test]
+fn test_build_protocol_correction_prompt_boundary_and_payload_isolation() {
+    let tools = vec![search_schema(), destructive_schema()];
+    let prompt = build_protocol_correction_prompt(&tools);
+
+    // Contains each advertised exact tool name
+    assert!(prompt.contains("\"search\""));
+    assert!(prompt.contains("\"write_file\""));
+
+    // Contains schema requirements for each tool
+    assert!(prompt.contains("\"query\""));
+    assert!(prompt.contains("\"path\""));
+    assert!(prompt.contains("\"content\""));
+    assert!(prompt.contains("\"required\""));
+
+    // Contains canonical single-call name/arguments rule
+    assert!(prompt.contains(
+        "exactly one canonical tool-call object containing exact \"name\" and object \"arguments\""
+    ));
+    assert!(prompt.contains("{\"name\": \"<exact_tool_name>\", \"arguments\": { ... }}"));
+
+    // Contains prohibition on invented missing values
+    assert!(prompt.contains("Do not invent missing tool names, arguments, or required values."));
+
+    // Cannot contain an arbitrary malformed/raw payload because none is accepted
+    let arbitrary_malformed_payloads = [
+        "{\"bad\": \"syntax error\"",
+        "<tool_call>{\"name\":\"arbitrary_injected\"}</tool_call>",
+        "rm -rf /",
+        "drop table users;",
+        "malformed_payload_marker_12345",
+    ];
+    for payload in arbitrary_malformed_payloads {
+        assert!(
+            !prompt.contains(payload),
+            "Prompt must not contain arbitrary payload '{payload}'"
+        );
+    }
+
+    // When empty, instructs direct final text without tool listings
+    let empty_prompt = build_protocol_correction_prompt(&[]);
+    assert!(empty_prompt
+        .contains("No tools are currently available. Please provide direct final text."));
+    assert!(!empty_prompt.contains("\"search\""));
+    assert!(!empty_prompt.contains("\"write_file\""));
+}
+
+#[test]
+fn test_protocol_failure_terminal_answer_safety_and_clarity() {
+    let answer = protocol_failure_terminal_answer();
+
+    // Must be clear and non-empty
+    assert!(!answer.trim().is_empty());
+
+    // Must mention no action taken
+    assert!(answer.contains("no action"));
+
+    // Must contain none of '<', '>', or 'tool_call'
+    assert!(!answer.contains('<'));
+    assert!(!answer.contains('>'));
+    assert!(!answer.to_lowercase().contains("tool_call"));
+
+    // Must contain no invalid or malformed payload markers
+    assert!(!answer.contains('{'));
+    assert!(!answer.contains('}'));
+    assert!(!answer.to_lowercase().contains("payload"));
+    assert!(!answer.to_lowercase().contains("malformed"));
+    assert!(!answer.to_lowercase().contains("syntax"));
 }
