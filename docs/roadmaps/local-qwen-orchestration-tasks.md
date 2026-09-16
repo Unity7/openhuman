@@ -200,6 +200,17 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib intent_tests`;
   `git diff --check`.
 
+### G4-GY — intent URL trim clippy seam (wave 4.7, lane capability)
+
+- Depends: G4-GX.
+- Change: `crates/openhuman-core/src/agent/primary_orchestration/intent.rs`.
+- Context: None.
+- Replace the manual start/end punctuation character comparisons in URL token
+  trimming with equivalent character-array patterns. Preserve the exact
+  punctuation set and resolver behavior.
+- Verify: `cargo clippy --manifest-path Cargo.toml -p openhuman --lib -- -D warnings`;
+  `git diff --check`.
+
 ### G4-I — exact capability catalog (wave 4.3, lane catalog)
 
 - Depends: G4-A, G4-G.
