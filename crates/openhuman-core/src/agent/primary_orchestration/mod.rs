@@ -28,3 +28,7 @@ pub use planner::{plan_capabilities, CapabilityPlannerInput};
 pub(crate) use runtime::{
     clear_primary_checkpoint, has_live_primary_checkpoint, primary_checkpoint_store,
 };
+
+#[cfg(test)]
+#[path = "gate4_tests.rs"]
+mod gate4_tests;
