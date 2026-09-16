@@ -494,6 +494,18 @@ Execute this acceptance lane as the two disjoint atomic lanes G5-E1 and G5-E2.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose::tests`;
   `git diff --check`.
 
+### G5-AZ — Qwen correction prompt raw markup seam (wave 5.3, lane protocol-repair)
+
+- Depends: G5-E2.
+- Change: `crates/openhuman-core/src/agent/goose/qwen.rs`.
+- Context: `crates/openhuman-core/src/agent/goose/qwen_tests.rs`.
+- Remove raw `<tool_call>` wrappers from `build_protocol_correction_prompt` while
+  preserving canonical JSON `{"name": "<exact_tool_name>", "arguments": { ... }}`
+  correction guidance and exact-route behavior so raw protocol markup never enters
+  persisted conversation history.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose`;
+  `git diff --check`.
+
 ## Gate 6 — completion, guards, and use cases
 
 ### G6-A — typed completion contracts (wave 6.0, lane completion)
