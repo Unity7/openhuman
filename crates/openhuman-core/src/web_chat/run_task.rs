@@ -305,7 +305,13 @@ pub(crate) async fn run_chat_task(
     // wrappers below hold a pointer rather than inlining the whole future into
     // this already-large `run_chat_task` frame (which otherwise overflows the
     // default test-thread stack — see the channels web-turn coverage tests).
-    let turn = Box::pin(agent.run_primary_interactive(message, mode, engine, &checkpoint_id));
+    let turn = Box::pin(agent.run_primary_interactive(
+        message,
+        mode,
+        engine,
+        &checkpoint_id,
+        metadata.allow_metered_tools,
+    ));
     let result = match crate::agent::tinyagents::thread_context::with_thread_id(
         thread_id.to_string(),
         crate::memory::source_scope::with_source_scope(profile.memory_sources.clone(), turn),

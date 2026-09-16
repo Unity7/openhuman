@@ -17,10 +17,16 @@ use crate::{
     agent::{
         goose::{GooseCheckpointStore, GooseStopReason, GooseTurnAdapter},
         messages::{ChatMessage, ConversationMessage},
-        primary_orchestration::{primary_checkpoint_store, PrimaryTurnMode},
+        primary_orchestration::{
+            build_capability_catalog, plan_capabilities, primary_checkpoint_store,
+            resolve_request_intent, CapabilityBackend, CapabilityCatalog, CapabilityCatalogInputs,
+            CapabilityPlannerInput, CapabilityPolicy, CatalogRouteClass, MonetaryBoundary,
+            PrimaryTurnMode,
+        },
         progress::AgentProgress,
     },
-    config::OrchestrationEngine,
+    config::{OrchestrationEngine, SearchEngine},
+    tools::traits::PermissionLevel,
 };
 
 const DIRECT_CHAT_SYSTEM: &str = concat!(
@@ -41,6 +47,7 @@ impl Agent {
         mode: PrimaryTurnMode,
         engine: OrchestrationEngine,
         checkpoint_id: &str,
+        allow_metered_tools: Option<bool>,
     ) -> Result<String> {
         if engine == OrchestrationEngine::Tinyagents {
             return self.run_single(message).await;
@@ -50,7 +57,8 @@ impl Agent {
         let result = match mode {
             PrimaryTurnMode::Chat => self.run_direct_chat(message).await,
             PrimaryTurnMode::Assist | PrimaryTurnMode::Agent => {
-                self.run_goose_primary(message, mode, checkpoint_id).await
+                self.run_goose_primary(message, mode, checkpoint_id, allow_metered_tools)
+                    .await
             }
         };
         self.finish_guarded_run(&history_snapshot, result)
@@ -108,6 +116,8 @@ impl Agent {
             .unwrap_or_default();
         tracing::info!(
             mode = "chat",
+            routes = "",
+            monetary_boundaries = "",
             stop_reason = "final_answer",
             context_window = context_window.unwrap_or(0),
             latest_context_occupancy = usage.input_tokens,
@@ -146,10 +156,113 @@ impl Agent {
         user_message: &str,
         mode: PrimaryTurnMode,
         checkpoint_id: &str,
+        allow_metered_tools: Option<bool>,
     ) -> Result<String> {
-        let started = std::time::Instant::now();
-        let (models, context_window) = self.resolved_primary_model().await?;
         self.absorb_resumed_transcript_prefix();
+        let started = std::time::Instant::now();
+        let intent = resolve_request_intent(user_message, mode);
+
+        let durable_tools = self.tools.clone();
+        let synthesized_tools = self.synthesized_tools.clone();
+
+        let runtime = self.runtime_config.clone().unwrap_or_default();
+        let canonical_search = match runtime.search.effective_engine() {
+            SearchEngine::Disabled => None,
+            SearchEngine::Managed => Some(CatalogRouteClass {
+                backend: CapabilityBackend::Managed,
+                monetary_boundary: MonetaryBoundary::ManagedMetered,
+            }),
+            SearchEngine::Parallel
+            | SearchEngine::Brave
+            | SearchEngine::Querit
+            | SearchEngine::Exa
+            | SearchEngine::Tavily => Some(CatalogRouteClass {
+                backend: CapabilityBackend::Byok,
+                monetary_boundary: MonetaryBoundary::UserSuppliedKey,
+            }),
+        };
+
+        let catalog_inputs = CapabilityCatalogInputs {
+            canonical_search,
+            availability: Default::default(),
+        };
+
+        let durable_catalog = build_capability_catalog(&durable_tools, &catalog_inputs)?;
+        let mut synthesized_catalog =
+            build_capability_catalog(&synthesized_tools, &catalog_inputs)?;
+
+        let durable_count = durable_catalog.routes.len();
+        for route in &mut synthesized_catalog.routes {
+            route.capability.registration_index += durable_count;
+        }
+
+        let mut routes = durable_catalog.routes;
+        routes.extend(synthesized_catalog.routes);
+        let mut diagnostics = durable_catalog.diagnostics;
+        diagnostics.extend(synthesized_catalog.diagnostics);
+        let catalog = CapabilityCatalog {
+            routes,
+            diagnostics,
+        };
+
+        let managed_allowed =
+            runtime.agent.allow_metered_agent_tools && allow_metered_tools.unwrap_or(true);
+        let policy = CapabilityPolicy::new(PermissionLevel::Dangerous, managed_allowed, true, true);
+
+        let session_ceiling = if self.visible_tool_names.is_empty() {
+            None
+        } else {
+            Some(&self.visible_tool_names)
+        };
+
+        let plan = plan_capabilities(CapabilityPlannerInput::new(
+            mode,
+            &intent,
+            &catalog,
+            session_ceiling,
+            policy,
+        ))?;
+
+        if plan.routes.is_empty() {
+            if let Some(reason) = plan.unavailable_reason {
+                self.emit_primary_progress(AgentProgress::TurnStarted).await;
+                tracing::info!(
+                    mode = mode.as_str(),
+                    routes = "",
+                    monetary_boundaries = "",
+                    stop_reason = "unavailable",
+                    context_window = 0,
+                    latest_context_occupancy = 0,
+                    cumulative_input_tokens = 0,
+                    cumulative_output_tokens = 0,
+                    primary_calls = 0,
+                    "[primary-orchestration] Goose turn stopped"
+                );
+                self.history
+                    .push(ConversationMessage::Chat(ChatMessage::user(
+                        user_message.to_string(),
+                    )));
+                self.history
+                    .push(ConversationMessage::Chat(ChatMessage::assistant(
+                        reason.clone(),
+                    )));
+                self.finish_primary_mode_turn(
+                    user_message,
+                    &reason,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    started,
+                    true,
+                )
+                .await;
+                return Ok(reason);
+            }
+        }
+
+        let (models, context_window) = self.resolved_primary_model().await?;
 
         // Gate 3 proves dispatch through Goose while exposing no task tools.
         // Gate 4 supplies the typed ordered capability plan and security-backed
@@ -176,7 +289,6 @@ impl Agent {
         }
         let store_dyn: Arc<dyn GooseCheckpointStore> = store;
 
-        let runtime = self.runtime_config.clone().unwrap_or_default();
         let policy = Arc::new(crate::security::SecurityPolicy::from_config(
             &runtime.autonomy,
             &runtime.workspace_dir,
@@ -187,14 +299,30 @@ impl Agent {
             Vec::new(),
         ));
         let provider_id = models.provider_id().to_string();
+        let route_names = plan
+            .routes
+            .iter()
+            .map(|route| route.capability.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let monetary_boundaries = plan
+            .routes
+            .iter()
+            .map(|route| match route.capability.monetary_boundary {
+                MonetaryBoundary::NonMetered => "non_metered",
+                MonetaryBoundary::UserSuppliedKey => "user_supplied_key",
+                MonetaryBoundary::ManagedMetered => "managed_metered",
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         let adapter = GooseTurnAdapter {
             store: store_dyn,
             model: models.primary,
             model_name: self.model_name.clone(),
             provider_id,
-            durable_tools: Arc::new(Vec::new()),
-            synthesized_tools: Arc::new(Vec::new()),
-            routes: Vec::new(),
+            durable_tools,
+            synthesized_tools,
+            routes: plan.routes,
             security,
             progress: self.on_progress.clone(),
             cancel: tokio_util::sync::CancellationToken::new(),
@@ -204,6 +332,8 @@ impl Agent {
         let outcome = adapter.run(checkpoint_id).await?;
         tracing::info!(
             mode = mode.as_str(),
+            routes = %route_names,
+            monetary_boundaries = %monetary_boundaries,
             stop_reason = outcome.stop_reason.as_str(),
             context_window = context_window.unwrap_or(0),
             latest_context_occupancy = outcome.checkpoint.usage.latest_primary_input_tokens,
@@ -460,6 +590,7 @@ mod tests {
                     PrimaryTurnMode::Chat,
                     OrchestrationEngine::Goose,
                     "chat-test",
+                    None,
                 )
                 .await
                 .expect("direct chat succeeds");
@@ -492,6 +623,7 @@ mod tests {
                     mode,
                     OrchestrationEngine::Goose,
                     mode.as_str(),
+                    None,
                 )
                 .await
                 .expect("Goose turn succeeds");
@@ -527,6 +659,7 @@ mod tests {
                                 PrimaryTurnMode::Chat,
                                 OrchestrationEngine::Tinyagents,
                                 "rollback",
+                                None,
                             )
                             .await
                             .expect("TinyAgents rollback succeeds");
