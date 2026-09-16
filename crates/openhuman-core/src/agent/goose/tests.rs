@@ -1125,7 +1125,7 @@ async fn qwen_exact_route_multiple_provider_calls_pairing_and_single_execution()
         final_response("finished successfully", Usage::new(20, 3)),
     ]));
 
-    let adapter = to_qwen_route(adapter(
+    let run_adapter = to_qwen_route(adapter(
         store.clone(),
         model.clone(),
         calls.clone(),
@@ -1134,7 +1134,7 @@ async fn qwen_exact_route_multiple_provider_calls_pairing_and_single_execution()
         CancellationToken::new(),
     ));
 
-    let outcome = adapter.run(session_id).await.unwrap();
+    let outcome = run_adapter.run(session_id).await.unwrap();
 
     assert_eq!(outcome.stop_reason, GooseStopReason::FinalAnswer);
     assert_eq!(model.requests.lock().unwrap().len(), 2);
