@@ -6,7 +6,10 @@ use goose_agent::operation::{
     applied, not_applicable, Emitter, Inference, InferenceInput, Operation, OperationResult,
 };
 use goose_provider_types::conversation::{
-    effective_role, token_usage::ProviderUsage, Conversation, EffectiveRole,
+    effective_role,
+    message::{Message, MessageMetadata},
+    token_usage::ProviderUsage,
+    Conversation, EffectiveRole,
 };
 use tinyinference::model::{ChatModel, ModelRequest};
 
@@ -14,6 +17,10 @@ use crate::agent::progress::AgentProgress;
 
 use super::{
     convert::{goose_to_model_messages, rmcp_tools_to_tiny, tiny_response_to_goose},
+    qwen::{
+        build_protocol_correction_prompt, is_local_qwen_route, normalize_qwen_response,
+        protocol_failure_terminal_answer,
+    },
     types::{GooseSession, OpenHumanEffect},
 };
 
@@ -78,7 +85,8 @@ impl Inference<GooseSession, OpenHumanEffect> for OpenHumanInference {
                 .join("\n\n");
             messages.insert(0, tinyinference::message::Message::system(system));
         }
-        let mut request = ModelRequest::new(messages).with_tools(rmcp_tools_to_tiny(&input.tools));
+        let advertised_tools = rmcp_tools_to_tiny(&input.tools);
+        let mut request = ModelRequest::new(messages).with_tools(advertised_tools.clone());
         if let Some(max_tokens) = self.max_output_tokens {
             request = request.with_max_tokens(max_tokens);
         }
@@ -87,6 +95,11 @@ impl Inference<GooseSession, OpenHumanEffect> for OpenHumanInference {
             biased;
             _ = emit.cancelled() => return goose_agent::operation::yielded(),
             response = self.model.invoke(&(), request) => response?,
+        };
+        let (response, invalid_call) = if is_local_qwen_route(&self.provider_id, &self.model_name) {
+            normalize_qwen_response(response, &advertised_tools).into_parts()
+        } else {
+            (response, None)
         };
         let usage = response
             .usage
@@ -168,7 +181,7 @@ impl Inference<GooseSession, OpenHumanEffect> for OpenHumanInference {
         )))
         .await;
 
-        applied([
+        let mut effects = vec![
             OpenHumanEffect::from(message),
             OpenHumanEffect::Usage {
                 model: self.model_name.clone(),
@@ -178,6 +191,24 @@ impl Inference<GooseSession, OpenHumanEffect> for OpenHumanInference {
                 cache_creation_tokens: usage.cache_creation_tokens,
                 reasoning_tokens: usage.reasoning_tokens,
             },
-        ])
+        ];
+
+        if invalid_call.is_some() {
+            if session.checkpoint.protocol_correction_count == 0 {
+                let mut correction =
+                    Message::user().with_text(build_protocol_correction_prompt(&advertised_tools));
+                correction.metadata = MessageMetadata::agent_only();
+                let message = emit.message(correction).await;
+                effects.push(OpenHumanEffect::from(message));
+                effects.push(OpenHumanEffect::IncrementProtocolCorrection);
+            } else {
+                let terminal = Message::assistant().with_text(protocol_failure_terminal_answer());
+                let message = emit.message(terminal).await;
+                effects.push(OpenHumanEffect::from(message));
+                effects.push(OpenHumanEffect::SetTerminalProtocolFailure);
+            }
+        }
+
+        applied(effects)
     }
 }
