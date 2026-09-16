@@ -1523,3 +1523,147 @@ async fn loop_guard_completion_contract_satisfied_records_completed() {
         Some(crate::agent::primary_orchestration::CompletionStatus::Complete)
     );
 }
+
+#[test]
+fn terminal_route_failure_classification() {
+    use super::tools::is_terminal_route_failure;
+    assert!(is_terminal_route_failure("USER_INSUFFICIENT_CREDITS: balance is zero"));
+    assert!(is_terminal_route_failure("This request requires more credits"));
+    assert!(is_terminal_route_failure("Insufficient Balance"));
+    assert!(is_terminal_route_failure("Quota exceeded for model"));
+    assert!(is_terminal_route_failure("No active credentials for provider: custom_openai"));
+    assert!(is_terminal_route_failure("invalid_authentication_error: key revoked"));
+    assert!(!is_terminal_route_failure("File not found: test.txt"));
+    assert!(!is_terminal_route_failure("Network timeout after 5000ms"));
+}
+
+#[test]
+fn same_boundary_alternative_retention_rules() {
+    use super::tools::{is_same_boundary_alternative, retain_authorized_alternatives};
+    use crate::agent::primary_orchestration::capability::*;
+
+    let search_free_a = ToolRoute::new(ToolCapability {
+        name: "search_a".into(),
+        operations: vec![CapabilityOperation::SearchWeb],
+        modalities: vec![CapabilityModality::Text],
+        backend: CapabilityBackend::DirectNetwork,
+        monetary_boundary: MonetaryBoundary::NonMetered,
+        side_effect: CapabilitySideEffect::ExternalRead,
+        availability: CapabilityAvailability::Available,
+        permission: Default::default(),
+        priority: 100,
+        registration_index: 0,
+    });
+
+    let search_free_b = ToolRoute::new(ToolCapability {
+        name: "search_b".into(),
+        operations: vec![CapabilityOperation::SearchWeb],
+        modalities: vec![CapabilityModality::Text],
+        backend: CapabilityBackend::DirectNetwork,
+        monetary_boundary: MonetaryBoundary::NonMetered,
+        side_effect: CapabilitySideEffect::ExternalRead,
+        availability: CapabilityAvailability::Available,
+        permission: Default::default(),
+        priority: 90,
+        registration_index: 1,
+    });
+
+    let search_paid = ToolRoute::new(ToolCapability {
+        name: "search_paid".into(),
+        operations: vec![CapabilityOperation::SearchWeb],
+        modalities: vec![CapabilityModality::Text],
+        backend: CapabilityBackend::Managed,
+        monetary_boundary: MonetaryBoundary::ManagedMetered,
+        side_effect: CapabilitySideEffect::ExternalRead,
+        availability: CapabilityAvailability::Available,
+        permission: Default::default(),
+        priority: 50,
+        registration_index: 2,
+    });
+
+    let shell_tool = ToolRoute::new(ToolCapability {
+        name: "shell".into(),
+        operations: vec![CapabilityOperation::ExecuteCommand],
+        modalities: vec![CapabilityModality::Text],
+        backend: CapabilityBackend::Local,
+        monetary_boundary: MonetaryBoundary::NonMetered,
+        side_effect: CapabilitySideEffect::LocalWrite,
+        availability: CapabilityAvailability::Available,
+        permission: Default::default(),
+        priority: 100,
+        registration_index: 3,
+    });
+
+    // Same boundary matches
+    assert!(is_same_boundary_alternative(&search_free_a, &search_free_b));
+    // Different monetary boundary fails
+    assert!(!is_same_boundary_alternative(&search_free_a, &search_paid));
+    // Different operation fails
+    assert!(!is_same_boundary_alternative(&search_free_a, &shell_tool));
+
+    let all_routes = vec![search_free_a.clone(), search_free_b.clone(), search_paid.clone()];
+    let retained = retain_authorized_alternatives(&all_routes, &["search_a".to_string()]);
+    // search_b is retained, but search_a is excluded and search_paid (different monetary boundary) is excluded
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].capability.name, "search_b");
+}
+
+struct TerminalFailingTool {
+    name: String,
+    error_msg: String,
+}
+
+#[async_trait]
+impl Tool for TerminalFailingTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        "A tool that fails with a terminal error"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": { "key": { "type": "string" } }
+        })
+    }
+
+    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+        Ok(ToolResult::error(&self.error_msg))
+    }
+}
+
+#[tokio::test]
+async fn terminal_route_failure_marks_route_unavailable_and_blocks_subsequent_request() {
+    let store = Arc::new(InMemoryGooseCheckpointStore::default());
+    store.insert(
+        "turn-terminal",
+        GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+    );
+    let model = Arc::new(ScriptedModel::new(vec![
+        named_tool_response("call-1", "credit_failing_tool", "arg1", Usage::new(10, 2)),
+        named_tool_response("call-2", "credit_failing_tool", "arg2", Usage::new(10, 2)),
+    ]));
+    let failing_tool = Box::new(TerminalFailingTool {
+        name: "credit_failing_tool".into(),
+        error_msg: "USER_INSUFFICIENT_CREDITS: balance is zero".into(),
+    });
+    let adapter = adapter_with_snapshots_and_routes(
+        store.clone(),
+        model,
+        Arc::new(vec![failing_tool]),
+        Arc::new(Vec::new()),
+        vec![default_route("credit_failing_tool")],
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    );
+
+    let outcome = adapter.run("turn-terminal").await.unwrap();
+    // After call-1 failed with terminal error, credit_failing_tool was marked unavailable.
+    // Call-2 then tried to request credit_failing_tool, which was stopped by UnavailableRequestGuard!
+    assert_eq!(outcome.stop_reason, GooseStopReason::UnavailableTool);
+    assert!(outcome.checkpoint.unavailable_routes.contains(&"credit_failing_tool".to_string()));
+}

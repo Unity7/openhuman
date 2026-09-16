@@ -52,6 +52,75 @@ impl GooseToolSecurity for crate::agent::tinyagents::host::OpenHumanSecurityGate
     }
 }
 
+/// Classify balance/quota/credential/provider terminal failures.
+pub fn is_terminal_route_failure(message: &str) -> bool {
+    if crate::inference::provider::is_budget_exhausted_message(message)
+        || crate::inference::provider::is_provider_config_rejection_message(message)
+        || crate::core::observability::is_insufficient_credits_message(message)
+    {
+        return true;
+    }
+    let norm = message.to_ascii_lowercase().replace('_', " ");
+    norm.contains("insufficient credit")
+        || norm.contains("insufficient balance")
+        || norm.contains("quota exceeded")
+        || norm.contains("rate limit")
+        || norm.contains("invalid api key")
+        || norm.contains("unauthorized")
+        || norm.contains("authentication failed")
+        || norm.contains("no active credentials")
+        || norm.contains("payment required")
+        || norm.contains("budget exhausted")
+}
+
+/// Verify whether candidate tool route is an authorized same-boundary alternative to the failed route.
+/// Never allows cross retrieval/generation, cost, permission, effect, or modality.
+pub fn is_same_boundary_alternative(failed: &ToolRoute, candidate: &ToolRoute) -> bool {
+    candidate.capability.name != failed.capability.name
+        && candidate.capability.operations == failed.capability.operations
+        && candidate.capability.modalities == failed.capability.modalities
+        && candidate.capability.monetary_boundary == failed.capability.monetary_boundary
+        && candidate.capability.side_effect == failed.capability.side_effect
+        && candidate.capability.permission <= failed.capability.permission
+}
+
+/// Retain only already-authorized same-boundary alternatives when a route fails.
+pub fn retain_authorized_alternatives(
+    routes: &[ToolRoute],
+    unavailable_routes: &[String],
+) -> Vec<ToolRoute> {
+    if unavailable_routes.is_empty() {
+        return routes.to_vec();
+    }
+    let failed_routes: Vec<&ToolRoute> = routes
+        .iter()
+        .filter(|r| unavailable_routes.iter().any(|u| u == &r.capability.name))
+        .collect();
+
+    routes
+        .iter()
+        .filter(|route| {
+            if unavailable_routes.iter().any(|u| u == &route.capability.name) {
+                return false;
+            }
+            for failed in &failed_routes {
+                if failed
+                    .capability
+                    .operations
+                    .iter()
+                    .any(|op| route.capability.operations.contains(op))
+                {
+                    if !is_same_boundary_alternative(failed, route) {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect()
+}
+
 pub struct GooseToolRegistry {
     pub durable_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
     pub synthesized_tools: Arc<Vec<Box<dyn crate::tools::Tool>>>,
@@ -82,6 +151,13 @@ impl GooseToolRegistry {
         self.enabled_names.contains(name)
     }
 
+    pub fn is_enabled_for_session(&self, name: &str, unavailable_routes: &[String]) -> bool {
+        if unavailable_routes.iter().any(|u| u == name) {
+            return false;
+        }
+        self.enabled_names.contains(name)
+    }
+
     pub fn resolve(&self, name: &str) -> Option<&dyn crate::tools::Tool> {
         self.durable_tools
             .iter()
@@ -98,6 +174,21 @@ impl GooseToolRegistry {
     pub fn advertised_tools(&self) -> Result<Vec<Tool>> {
         let mut tools = Vec::new();
         for route in &self.routes {
+            if !self.enabled_names.contains(&route.capability.name) {
+                continue;
+            }
+            let Some(tool) = self.resolve(&route.capability.name) else {
+                continue;
+            };
+            tools.push(rmcp_definition(tool)?);
+        }
+        Ok(tools)
+    }
+
+    pub fn advertised_tools_for_session(&self, unavailable_routes: &[String]) -> Result<Vec<Tool>> {
+        let retained_routes = retain_authorized_alternatives(&self.routes, unavailable_routes);
+        let mut tools = Vec::new();
+        for route in &retained_routes {
             if !self.enabled_names.contains(&route.capability.name) {
                 continue;
             }
@@ -159,8 +250,9 @@ fn denied_result(reason: String) -> CallToolResult {
 
 #[async_trait]
 impl ToolProvider<GooseSession> for OpenHumanToolProvider {
-    async fn tools(&self, _session: &GooseSession) -> Result<Vec<Tool>> {
-        self.registry.advertised_tools()
+    async fn tools(&self, session: &GooseSession) -> Result<Vec<Tool>> {
+        self.registry
+            .advertised_tools_for_session(&session.checkpoint.unavailable_routes)
     }
 
     async fn call(
@@ -172,9 +264,12 @@ impl ToolProvider<GooseSession> for OpenHumanToolProvider {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let arguments = serde_json::Value::Object(call.arguments.clone().unwrap_or_default());
         let tool_name = call.name.to_string();
-        if !self.registry.is_enabled(&tool_name) {
+        if !self
+            .registry
+            .is_enabled_for_session(&tool_name, &session.checkpoint.unavailable_routes)
+        {
             return Err(ErrorData::invalid_params(
-                format!("tool '{tool_name}' is not enabled"),
+                format!("tool '{tool_name}' is not enabled or currently unavailable"),
                 None,
             ));
         }

@@ -106,7 +106,7 @@ impl Operation<GooseSession, OpenHumanEffect> for UnavailableRequestGuard {
 
     async fn run(
         &self,
-        _session: &GooseSession,
+        session: &GooseSession,
         conversation: &Conversation,
         emit: &Emitter,
     ) -> Result<OperationResult<OpenHumanEffect>> {
@@ -129,7 +129,10 @@ impl Operation<GooseSession, OpenHumanEffect> for UnavailableRequestGuard {
             request
                 .tool_call
                 .as_ref()
-                .map(|call| !self.enabled_names.contains(call.name.as_ref()))
+                .map(|call| {
+                    !self.enabled_names.contains(call.name.as_ref())
+                        || session.checkpoint.unavailable_routes.contains(&call.name.to_string())
+                })
                 .unwrap_or(false)
         });
 
@@ -279,23 +282,32 @@ impl Operation<GooseSession, OpenHumanEffect> for ObservationLoopGuard {
         if !success {
             let error_line = output.lines().next().unwrap_or("").trim();
             let failure_type = format!("{}:{}", action.tool_name, error_line);
+            let is_terminal = super::tools::is_terminal_route_failure(&output);
             if session.checkpoint.last_failure_type.as_deref() == Some(&failure_type) {
                 let explanation = format!(
                     "Turn stopped by loop guard: tool '{}' failed repeatedly with error: {}",
                     action.tool_name, output
                 );
                 let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
-                return goose_agent::operation::yielded_with(vec![
+                let mut effects = vec![
                     OpenHumanEffect::from(assistant_msg),
                     OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
                     OpenHumanEffect::RecordFailure(failure_type),
                     OpenHumanEffect::SetTerminalReason(Some("repeated_failure".into())),
-                ]);
+                ];
+                if is_terminal {
+                    effects.push(OpenHumanEffect::MarkRouteUnavailable(action.tool_name.clone()));
+                }
+                return goose_agent::operation::yielded_with(effects);
             }
-            return goose_agent::operation::applied(vec![
+            let mut effects = vec![
                 OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
                 OpenHumanEffect::RecordFailure(failure_type),
-            ]);
+            ];
+            if is_terminal {
+                effects.push(OpenHumanEffect::MarkRouteUnavailable(action.tool_name.clone()));
+            }
+            return goose_agent::operation::applied(effects);
         }
 
         let is_mutation = self.routes.iter().any(|r| {
