@@ -392,6 +392,17 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo check --manifest-path Cargo.toml -p openhuman --lib`;
   `git diff --check`.
 
+### G5-AY — Qwen stripped-markup whitespace seam (wave 5.1, lane protocol-repair)
+
+- Depends: G5-B.
+- Change: `crates/openhuman-core/src/agent/goose/qwen.rs`.
+- Context: `crates/openhuman-core/src/agent/goose/qwen_tests.rs`.
+- Assemble consecutive response text blocks without injecting separators and,
+  when removing a complete tool-call block, avoid leaving a duplicate blank
+  line between the visible prefix and suffix. Preserve ordinary text whitespace.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib qwen_tests`;
+  `git diff --check`.
+
 ### G5-C — persisted protocol correction state (wave 5.0, lane persistence)
 
 - Depends: Gate 4 passed.
