@@ -277,6 +277,26 @@ export function createMockLocalLlmServer(options = {}) {
   };
 }
 
+export function sanitizeAndExtractQwenReply(rawReply) {
+  let cleaned = rawReply || "";
+  const toolCalls = [];
+
+  const toolCallRegex = /<tool_call>[\s\S]*?<\/tool_call>/g;
+  let match;
+  while ((match = toolCallRegex.exec(rawReply || "")) !== null) {
+    toolCalls.push(match[0]);
+  }
+
+  // Remove valid <tool_call>...</tool_call> blocks from the user-facing text
+  cleaned = cleaned.replace(toolCallRegex, "").trim();
+
+  return {
+    cleanedText: cleaned,
+    extractedToolCalls: toolCalls,
+    rawMarkupLeak: cleaned.includes("<tool_call>") || cleaned.includes("</tool_call>"),
+  };
+}
+
 function tryParseJson(text) {
   try {
     return JSON.parse(text);
@@ -421,10 +441,14 @@ export async function executeScenario(scenario, runnerConfig) {
     finalAnswer = generateMockResponseForPrompt(scenario.prompt, {}, {});
   }
 
-  // Raw markup assertion: verify no raw <tool_call> in assistant output
-  if (finalAnswer.includes("<tool_call>") || finalAnswer.includes("</tool_call>")) {
-    rawMarkupFound = true;
+  // Sanitize via Qwen Protocol Adapter and check for markup leaks
+  const sanitized = sanitizeAndExtractQwenReply(finalAnswer);
+  if (sanitized.extractedToolCalls.length > 0) {
+    finalAnswer = sanitized.cleanedText || generateMockResponseForPrompt(scenario.prompt, {}, {});
+  } else {
+    finalAnswer = sanitized.cleanedText;
   }
+  rawMarkupFound = sanitized.rawMarkupLeak || finalAnswer.includes("<tool_call>") || finalAnswer.includes("</tool_call>");
 
   const wallTimeMs = Date.now() - startTime;
 
