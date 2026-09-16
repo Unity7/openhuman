@@ -6,11 +6,13 @@
 
 mod convert;
 mod inference;
+pub mod qwen;
 mod runner;
 mod store;
 mod tools;
 mod types;
 
+pub use qwen::{normalize_qwen_response, NormalizedQwenResponse, QwenInvalidCall};
 pub use runner::GooseTurnAdapter;
 pub use store::{FileGooseCheckpointStore, GooseCheckpointStore, InMemoryGooseCheckpointStore};
 pub use tools::GooseToolSecurity;
@@ -22,3 +24,8 @@ pub use types::{
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "qwen_tests.rs"]
+#[rustfmt::skip]
+mod qwen_tests;
