@@ -100,7 +100,10 @@ pub fn retain_authorized_alternatives(
     routes
         .iter()
         .filter(|route| {
-            if unavailable_routes.iter().any(|u| u == &route.capability.name) {
+            if unavailable_routes
+                .iter()
+                .any(|u| u == &route.capability.name)
+            {
                 return false;
             }
             for failed in &failed_routes {
@@ -109,10 +112,9 @@ pub fn retain_authorized_alternatives(
                     .operations
                     .iter()
                     .any(|op| route.capability.operations.contains(op))
+                    && !is_same_boundary_alternative(failed, route)
                 {
-                    if !is_same_boundary_alternative(failed, route) {
-                        return false;
-                    }
+                    return false;
                 }
             }
             true

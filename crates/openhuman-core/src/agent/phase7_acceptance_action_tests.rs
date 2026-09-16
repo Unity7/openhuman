@@ -13,10 +13,7 @@ use serde_json::json;
 use super::*;
 use crate::agent::{
     goose::GooseStopReason,
-    primary_orchestration::{
-        capability::*,
-        completion::CompletionContract,
-    },
+    primary_orchestration::{capability::*, completion::CompletionContract},
 };
 
 #[tokio::test]
@@ -24,15 +21,13 @@ async fn unrelated_chat_with_failed_memory_completes_cleanly() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-chat-failed-mem";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Hello, how are you today?"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Hello, how are you today?"),
+        )
+        .unwrap(),
+    );
 
     let mem_tool = Box::new(MemoryStubTool::failed("memory_tool"));
     let mem_route = mem_tool.as_route(false, 100);
@@ -66,15 +61,13 @@ async fn explicit_failed_recall_handles_tool_error_gracefully() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-explicit-failed-recall";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("What is my project code name from before?"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("What is my project code name from before?"),
+        )
+        .unwrap(),
+    );
 
     let mem_tool = Box::new(MemoryStubTool::failed("recall_memory"));
     let mut mem_route = mem_tool.as_route(false, 100);
@@ -118,15 +111,13 @@ async fn healthy_recall_and_store_lifecycle() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-store-mem";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Remember that my project is Bluebell."),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Remember that my project is Bluebell."),
+        )
+        .unwrap(),
+    );
 
     let mem_tool = Box::new(MemoryStubTool::healthy("store_memory", Vec::new()));
     let mem_store = mem_tool.memory_store.clone();
@@ -141,11 +132,7 @@ async fn healthy_recall_and_store_lifecycle() {
                 30,
                 15,
             ),
-            make_final_response(
-                "I've noted that your project name is Bluebell.",
-                45,
-                15,
-            ),
+            make_final_response("I've noted that your project name is Bluebell.", 45, 15),
         ],
         harness.endpoint_counter.clone(),
     ));
@@ -172,15 +159,13 @@ async fn approved_repository_edit_plus_verification() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-repo-edit";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Update error handling in src/lib.rs"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Update error handling in src/lib.rs"),
+        )
+        .unwrap(),
+    );
 
     let patch_calls = Arc::new(AtomicUsize::new(0));
     let patch_effects = Arc::new(AtomicUsize::new(0));
@@ -209,11 +194,14 @@ async fn approved_repository_edit_plus_verification() {
         verify_calls.clone(),
         verify_effects.clone(),
         |_args| {
-            Ok(ToolResult::success(json!({
-                "file_paths": ["src/lib.rs"],
-                "verification": "verified",
-                "summary": "cargo check and tests passed cleanly"
-            }).to_string()))
+            Ok(ToolResult::success(
+                json!({
+                    "file_paths": ["src/lib.rs"],
+                    "verification": "verified",
+                    "summary": "cargo check and tests passed cleanly"
+                })
+                .to_string(),
+            ))
         },
     ));
     let verify_route = verify_tool.as_route(90);
@@ -273,15 +261,13 @@ async fn durable_schedule_id_and_status() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-schedule-sync";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Schedule a recurring sync at 9 AM"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Schedule a recurring sync at 9 AM"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -295,11 +281,14 @@ async fn durable_schedule_id_and_status() {
         calls.clone(),
         effects.clone(),
         |_args| {
-            Ok(ToolResult::success(json!({
-                "schedule_id": "cron-daily-sync-9am",
-                "state": "active",
-                "cron_expression": "0 9 * * *"
-            }).to_string()))
+            Ok(ToolResult::success(
+                json!({
+                    "schedule_id": "cron-daily-sync-9am",
+                    "state": "active",
+                    "cron_expression": "0 9 * * *"
+                })
+                .to_string(),
+            ))
         },
     ));
     let schedule_route = schedule_tool.as_route(100);
@@ -345,15 +334,13 @@ async fn denied_approval_enforces_security_authority() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-denied-delete";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Drop table users"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Drop table users"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));

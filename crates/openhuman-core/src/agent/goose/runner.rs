@@ -134,7 +134,10 @@ impl Operation<GooseSession, OpenHumanEffect> for UnavailableRequestGuard {
                 .as_ref()
                 .map(|call| {
                     !self.enabled_names.contains(call.name.as_ref())
-                        || session.checkpoint.unavailable_routes.contains(&call.name.to_string())
+                        || session
+                            .checkpoint
+                            .unavailable_routes
+                            .contains(&call.name.to_string())
                 })
                 .unwrap_or(false)
         });
@@ -152,7 +155,9 @@ impl Operation<GooseSession, OpenHumanEffect> for UnavailableRequestGuard {
         let explanation = format!(
             "Turn stopped by loop guard: model requested tool '{tool_name}' which is not in active routes."
         );
-        let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+        let assistant_msg = emit
+            .message(Message::assistant().with_text(explanation))
+            .await;
 
         goose_agent::operation::yielded_with(vec![
             OpenHumanEffect::from(assistant_msg),
@@ -225,7 +230,9 @@ impl Operation<GooseSession, OpenHumanEffect> for DuplicateSignatureGuard {
             "Turn stopped by loop guard: duplicate call signature '{tool_name}' was repeated consecutively."
         );
         let response_msg = emit.message(response).await;
-        let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+        let assistant_msg = emit
+            .message(Message::assistant().with_text(explanation))
+            .await;
 
         goose_agent::operation::yielded_with(vec![
             OpenHumanEffect::from(response_msg),
@@ -291,7 +298,9 @@ impl Operation<GooseSession, OpenHumanEffect> for ObservationLoopGuard {
                     "Turn stopped by loop guard: tool '{}' failed repeatedly with error: {}",
                     action.tool_name, output
                 );
-                let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+                let assistant_msg = emit
+                    .message(Message::assistant().with_text(explanation))
+                    .await;
                 let mut effects = vec![
                     OpenHumanEffect::from(assistant_msg),
                     OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
@@ -299,7 +308,9 @@ impl Operation<GooseSession, OpenHumanEffect> for ObservationLoopGuard {
                     OpenHumanEffect::SetTerminalReason(Some("repeated_failure".into())),
                 ];
                 if is_terminal {
-                    effects.push(OpenHumanEffect::MarkRouteUnavailable(action.tool_name.clone()));
+                    effects.push(OpenHumanEffect::MarkRouteUnavailable(
+                        action.tool_name.clone(),
+                    ));
                 }
                 return goose_agent::operation::yielded_with(effects);
             }
@@ -308,7 +319,9 @@ impl Operation<GooseSession, OpenHumanEffect> for ObservationLoopGuard {
                 OpenHumanEffect::RecordFailure(failure_type),
             ];
             if is_terminal {
-                effects.push(OpenHumanEffect::MarkRouteUnavailable(action.tool_name.clone()));
+                effects.push(OpenHumanEffect::MarkRouteUnavailable(
+                    action.tool_name.clone(),
+                ));
             }
             return goose_agent::operation::applied(effects);
         }
@@ -328,7 +341,9 @@ impl Operation<GooseSession, OpenHumanEffect> for ObservationLoopGuard {
                 let explanation = format!(
                     "Turn stopped by loop guard: reached {next_count} consecutive informational tool calls without progress."
                 );
-                let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+                let assistant_msg = emit
+                    .message(Message::assistant().with_text(explanation))
+                    .await;
                 return goose_agent::operation::yielded_with(vec![
                     OpenHumanEffect::from(assistant_msg),
                     OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
@@ -462,152 +477,168 @@ impl GooseTurnAdapter {
 
         let final_answer = final_text(&session.checkpoint.conversation);
 
+        fn extract_completion_observation(
+            final_answer: Option<String>,
+            actions: &std::collections::BTreeMap<String, super::types::AcceptedToolAction>,
+        ) -> CompletionObservation {
+            let mut informational_tools_executed = Vec::new();
+            let mut web_sources = Vec::new();
+            let mut validated_images = Vec::new();
+            let mut generated_artifacts = Vec::new();
+            let mut repository_changes = Vec::new();
+            let mut scheduling_records = Vec::new();
+            let yielded_question = None;
+            let yielded_approval = None;
 
-fn extract_completion_observation(
-    final_answer: Option<String>,
-    actions: &std::collections::BTreeMap<String, super::types::AcceptedToolAction>,
-) -> CompletionObservation {
-    let mut informational_tools_executed = Vec::new();
-    let mut web_sources = Vec::new();
-    let mut validated_images = Vec::new();
-    let mut generated_artifacts = Vec::new();
-    let mut repository_changes = Vec::new();
-    let mut scheduling_records = Vec::new();
-    let yielded_question = None;
-    let yielded_approval = None;
+            for action in actions.values() {
+                if let Some(obs) = &action.observation {
+                    if obs.success {
+                        informational_tools_executed.push(action.tool_name.clone());
 
-    for action in actions.values() {
-        if let Some(obs) = &action.observation {
-            if obs.success {
-                informational_tools_executed.push(action.tool_name.clone());
-
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&obs.output) {
-                    if let Some(url) = v.get("url").and_then(|u| u.as_str()) {
-                        let source = v
-                            .get("source")
-                            .or_else(|| v.get("source_origin"))
-                            .and_then(|s| s.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let mime = v
-                            .get("mime_type")
-                            .and_then(|m| m.as_str())
-                            .map(ToString::to_string);
-                        if action.tool_name.contains("image")
-                            || url.ends_with(".png")
-                            || url.ends_with(".jpg")
-                            || url.ends_with(".jpeg")
-                            || url.ends_with(".webp")
-                            || url.ends_with(".svg")
-                        {
-                            validated_images.push(ValidatedImage {
-                                url_or_path: url.to_string(),
-                                source_origin: source.clone(),
-                                mime_type: mime,
-                            });
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&obs.output) {
+                            if let Some(url) = v.get("url").and_then(|u| u.as_str()) {
+                                let source = v
+                                    .get("source")
+                                    .or_else(|| v.get("source_origin"))
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let mime = v
+                                    .get("mime_type")
+                                    .and_then(|m| m.as_str())
+                                    .map(ToString::to_string);
+                                if action.tool_name.contains("image")
+                                    || url.ends_with(".png")
+                                    || url.ends_with(".jpg")
+                                    || url.ends_with(".jpeg")
+                                    || url.ends_with(".webp")
+                                    || url.ends_with(".svg")
+                                {
+                                    validated_images.push(ValidatedImage {
+                                        url_or_path: url.to_string(),
+                                        source_origin: source.clone(),
+                                        mime_type: mime,
+                                    });
+                                }
+                            }
+                            if let Some(sources) = v.get("sources").and_then(|s| s.as_array()) {
+                                for s in sources {
+                                    if let Some(url_str) = s.as_str() {
+                                        web_sources.push(url_str.to_string());
+                                    }
+                                }
+                            }
+                            if let Some(path) = v.get("path").and_then(|p| p.as_str()) {
+                                let desc = v
+                                    .get("description")
+                                    .and_then(|d| d.as_str())
+                                    .map(ToString::to_string);
+                                generated_artifacts.push(GeneratedArtifact {
+                                    path_or_url: path.to_string(),
+                                    description: desc,
+                                });
+                            }
+                            if let Some(sched_id) = v.get("schedule_id").and_then(|s| s.as_str()) {
+                                let state = v
+                                    .get("state")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("scheduled")
+                                    .to_string();
+                                scheduling_records.push(ScheduleRecord {
+                                    schedule_id: sched_id.to_string(),
+                                    state,
+                                });
+                            }
+                            if let Some(files) = v.get("file_paths").and_then(|f| f.as_array()) {
+                                let file_paths: Vec<String> = files
+                                    .iter()
+                                    .filter_map(|s| s.as_str().map(ToString::to_string))
+                                    .collect();
+                                let ver_str = v
+                                    .get("verification")
+                                    .and_then(|ver| ver.as_str())
+                                    .unwrap_or("unverified");
+                                let verification = match ver_str {
+                                    "verified" => VerificationStatus::Verified,
+                                    "failed" => VerificationStatus::Failed,
+                                    _ => VerificationStatus::Unverified,
+                                };
+                                let summary = v
+                                    .get("summary")
+                                    .and_then(|s| s.as_str())
+                                    .map(ToString::to_string);
+                                repository_changes.push(RepositoryChangeRecord {
+                                    file_paths,
+                                    verification,
+                                    summary,
+                                });
+                            }
                         }
-                    }
-                    if let Some(sources) = v.get("sources").and_then(|s| s.as_array()) {
-                        for s in sources {
-                            if let Some(url_str) = s.as_str() {
-                                web_sources.push(url_str.to_string());
+
+                        if action.tool_name.contains("image") && validated_images.is_empty() {
+                            if let Some(start) = obs
+                                .output
+                                .find("http://")
+                                .or_else(|| obs.output.find("https://"))
+                            {
+                                let slice = &obs.output[start..];
+                                let end = slice
+                                    .find(|c: char| {
+                                        c.is_whitespace()
+                                            || c == '"'
+                                            || c == '\''
+                                            || c == ')'
+                                            || c == ']'
+                                    })
+                                    .unwrap_or(slice.len());
+                                let url = &slice[..end];
+                                validated_images.push(ValidatedImage {
+                                    url_or_path: url.to_string(),
+                                    source_origin: action.tool_name.clone(),
+                                    mime_type: None,
+                                });
                             }
                         }
                     }
-                    if let Some(path) = v.get("path").and_then(|p| p.as_str()) {
-                        let desc = v
-                            .get("description")
-                            .and_then(|d| d.as_str())
-                            .map(ToString::to_string);
-                        generated_artifacts.push(GeneratedArtifact {
-                            path_or_url: path.to_string(),
-                            description: desc,
-                        });
-                    }
-                    if let Some(sched_id) = v.get("schedule_id").and_then(|s| s.as_str()) {
-                        let state = v
-                            .get("state")
-                            .and_then(|s| s.as_str())
-                            .unwrap_or("scheduled")
-                            .to_string();
-                        scheduling_records.push(ScheduleRecord {
-                            schedule_id: sched_id.to_string(),
-                            state,
-                        });
-                    }
-                    if let Some(files) = v.get("file_paths").and_then(|f| f.as_array()) {
-                        let file_paths: Vec<String> = files
-                            .iter()
-                            .filter_map(|s| s.as_str().map(ToString::to_string))
-                            .collect();
-                        let ver_str = v.get("verification").and_then(|ver| ver.as_str()).unwrap_or("unverified");
-                        let verification = match ver_str {
-                            "verified" => VerificationStatus::Verified,
-                            "failed" => VerificationStatus::Failed,
-                            _ => VerificationStatus::Unverified,
-                        };
-                        let summary = v.get("summary").and_then(|s| s.as_str()).map(ToString::to_string);
-                        repository_changes.push(RepositoryChangeRecord {
-                            file_paths,
-                            verification,
-                            summary,
-                        });
-                    }
-                }
-
-                if action.tool_name.contains("image") && validated_images.is_empty() {
-                    if let Some(start) = obs.output.find("http://").or_else(|| obs.output.find("https://")) {
-                        let slice = &obs.output[start..];
-                        let end = slice
-                            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == ')' || c == ']')
-                            .unwrap_or(slice.len());
-                        let url = &slice[..end];
-                        validated_images.push(ValidatedImage {
-                            url_or_path: url.to_string(),
-                            source_origin: action.tool_name.clone(),
-                            mime_type: None,
-                        });
-                    }
                 }
             }
-        }
-    }
 
-    if validated_images.is_empty() {
-        if let Some(text) = &final_answer {
-            if let Some(img_idx) = text.find("![") {
-                if let Some(paren_open) = text[img_idx..].find('(') {
-                    let from_paren = &text[img_idx + paren_open + 1..];
-                    if let Some(paren_close) = from_paren.find(')') {
-                        let url = from_paren[..paren_close].trim();
-                        if !url.is_empty() {
-                            validated_images.push(ValidatedImage {
-                                url_or_path: url.to_string(),
-                                source_origin: "final_text".into(),
-                                mime_type: None,
-                            });
+            if validated_images.is_empty() {
+                if let Some(text) = &final_answer {
+                    if let Some(img_idx) = text.find("![") {
+                        if let Some(paren_open) = text[img_idx..].find('(') {
+                            let from_paren = &text[img_idx + paren_open + 1..];
+                            if let Some(paren_close) = from_paren.find(')') {
+                                let url = from_paren[..paren_close].trim();
+                                if !url.is_empty() {
+                                    validated_images.push(ValidatedImage {
+                                        url_or_path: url.to_string(),
+                                        source_origin: "final_text".into(),
+                                        mime_type: None,
+                                    });
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-    }
 
-    CompletionObservation {
-        final_assistant_text: final_answer,
-        informational_tools_executed,
-        web_sources,
-        validated_images,
-        generated_artifacts,
-        repository_changes,
-        scheduling_records,
-        yielded_question,
-        yielded_approval,
-    }
-}
+            CompletionObservation {
+                final_assistant_text: final_answer,
+                informational_tools_executed,
+                web_sources,
+                validated_images,
+                generated_artifacts,
+                repository_changes,
+                scheduling_records,
+                yielded_question,
+                yielded_approval,
+            }
+        }
 
         if let Some(contract) = &self.contract {
-            let obs = extract_completion_observation(final_answer.clone(), &session.checkpoint.actions);
+            let obs =
+                extract_completion_observation(final_answer.clone(), &session.checkpoint.actions);
             let status = evaluate_completion(contract, &obs);
             session.checkpoint.completion_state = Some(status.clone());
             if status.is_complete() {

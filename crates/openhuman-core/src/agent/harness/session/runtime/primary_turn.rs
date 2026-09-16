@@ -315,7 +315,8 @@ impl Agent {
             })
             .collect::<Vec<_>>()
             .join(",");
-        let contract = crate::agent::primary_orchestration::completion::contract_from_intent(&intent);
+        let contract =
+            crate::agent::primary_orchestration::completion::contract_from_intent(&intent);
         let adapter = GooseTurnAdapter {
             store: store_dyn,
             model: models.primary,
@@ -369,7 +370,9 @@ impl Agent {
                 GooseStopReason::Yielded => anyhow!("The turn paused before producing an answer."),
                 GooseStopReason::FinalAnswer => anyhow!("The model returned an empty response."),
                 GooseStopReason::DuplicateSignature => {
-                    anyhow!("The turn was stopped by loop guard: identical call signature repeated.")
+                    anyhow!(
+                        "The turn was stopped by loop guard: identical call signature repeated."
+                    )
                 }
                 GooseStopReason::RepeatedFailure => {
                     anyhow!("The turn was stopped by loop guard: repeated typed tool failure.")
@@ -378,7 +381,9 @@ impl Agent {
                     anyhow!("The turn was stopped by loop guard: requested tool is unavailable.")
                 }
                 GooseStopReason::NoProgress => {
-                    anyhow!("The turn was stopped by loop guard: no progress across multiple passes.")
+                    anyhow!(
+                        "The turn was stopped by loop guard: no progress across multiple passes."
+                    )
                 }
                 GooseStopReason::Completed => anyhow!("The turn produced no final assistant text."),
             })?;

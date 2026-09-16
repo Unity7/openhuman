@@ -22,15 +22,13 @@ async fn cancellation_before_execution_stops_cleanly() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-cancel-pre";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Do something long"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Do something long"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -77,15 +75,13 @@ async fn cancellation_during_execution_stops_without_orphan_effect() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-cancel-mid";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Run risky task"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Run risky task"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -104,13 +100,7 @@ async fn cancellation_during_execution_stops_without_orphan_effect() {
 
     let model = Arc::new(RecordingModel::new(
         vec![
-            make_tool_call_response(
-                "call-risky",
-                "risky_task",
-                json!({ "arg": "val" }),
-                30,
-                15,
-            ),
+            make_tool_call_response("call-risky", "risky_task", json!({ "arg": "val" }), 30, 15),
             make_final_response("Finished", 50, 10),
         ],
         harness.endpoint_counter.clone(),
@@ -139,15 +129,13 @@ async fn fresh_process_resume_from_persisted_checkpoint() {
     let turn_id = "turn-fresh-resume";
 
     // Initialize checkpoint in store
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Execute step 1 then step 2"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Execute step 1 then step 2"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -229,15 +217,13 @@ async fn primary_call_ceiling_enforces_bounded_iterations() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-ceiling";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Keep searching"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Keep searching"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -288,15 +274,13 @@ async fn explicit_stop_reasons_tracked_in_outcome_and_checkpoint() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-dup-sig";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Do repeated action"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Do repeated action"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -345,15 +329,13 @@ async fn latest_context_occupancy_versus_cumulative_traffic() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-accounting";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Inspect file"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Inspect file"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -416,15 +398,13 @@ async fn bounded_deterministic_final_rendering() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-deterministic-render";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Summarize status"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Summarize status"),
+        )
+        .unwrap(),
+    );
 
     let expected_answer = "System status: all services operational.";
     let model = Arc::new(RecordingModel::new(

@@ -27,9 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     agent::{
-        goose::{
-            GooseToolSecurity, GooseTurnAdapter, InMemoryGooseCheckpointStore,
-        },
+        goose::{GooseToolSecurity, GooseTurnAdapter, InMemoryGooseCheckpointStore},
         messages::{ChatMessage, ConversationMessage},
         primary_orchestration::{
             capability::{

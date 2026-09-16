@@ -10,7 +10,10 @@ fn test_chat_contract_completion() {
         final_assistant_text: Some("Hello! How can I help you?".into()),
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&contract, &obs), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&contract, &obs),
+        CompletionStatus::Complete
+    );
 
     // Empty assistant text is incomplete
     obs.final_assistant_text = Some("   ".into());
@@ -24,7 +27,11 @@ fn test_chat_contract_completion() {
     obs.informational_tools_executed = vec!["memory_recall".into()];
     let res = evaluate_completion(&contract, &obs);
     assert!(res.is_incomplete());
-    if let CompletionStatus::Incomplete { needs_final_model_call, .. } = res {
+    if let CompletionStatus::Incomplete {
+        needs_final_model_call,
+        ..
+    } = res
+    {
         assert!(needs_final_model_call);
     }
 }
@@ -47,15 +54,23 @@ fn test_sourced_web_contract_completion() {
         web_sources: vec!["https://example.com/article".into()],
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&contract, &obs_complete), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&contract, &obs_complete),
+        CompletionStatus::Complete
+    );
 
     // Final text with embedded source URL completes even if list was not populated
     let obs_embedded_source = CompletionObservation {
-        final_assistant_text: Some("Details can be found at https://news.example.org/launch".into()),
+        final_assistant_text: Some(
+            "Details can be found at https://news.example.org/launch".into(),
+        ),
         web_sources: Vec::new(),
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&contract, &obs_embedded_source), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&contract, &obs_embedded_source),
+        CompletionStatus::Complete
+    );
 
     // Final text without any sources is false completion
     let obs_no_sources = CompletionObservation {
@@ -68,7 +83,9 @@ fn test_sourced_web_contract_completion() {
 
 #[test]
 fn test_image_retrieval_contract_completion() {
-    let contract = CompletionContract::ImageRetrieval { require_direct_media: true };
+    let contract = CompletionContract::ImageRetrieval {
+        require_direct_media: true,
+    };
 
     // Informational search/navigation executed without validated image is false completion
     let obs_nav_only = CompletionObservation {
@@ -107,12 +124,17 @@ fn test_image_retrieval_contract_completion() {
         }],
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&contract, &obs_valid_img), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&contract, &obs_valid_img),
+        CompletionStatus::Complete
+    );
 }
 
 #[test]
 fn test_artifact_generation_contract_completion() {
-    let contract = CompletionContract::ArtifactGeneration { require_explanation: true };
+    let contract = CompletionContract::ArtifactGeneration {
+        require_explanation: true,
+    };
 
     // No artifact is incomplete
     let obs_none = CompletionObservation::default();
@@ -138,12 +160,17 @@ fn test_artifact_generation_contract_completion() {
         final_assistant_text: Some("Here is the diagram illustrating the workflow.".into()),
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&contract, &obs_with_expl), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&contract, &obs_with_expl),
+        CompletionStatus::Complete
+    );
 }
 
 #[test]
 fn test_repository_mutation_contract_completion() {
-    let contract = CompletionContract::RepositoryMutation { require_verification: true };
+    let contract = CompletionContract::RepositoryMutation {
+        require_verification: true,
+    };
 
     // Informational tool only (read file) is incomplete
     let obs_info = CompletionObservation {
@@ -183,7 +210,10 @@ fn test_repository_mutation_contract_completion() {
         }],
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&contract, &obs_verified), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&contract, &obs_verified),
+        CompletionStatus::Complete
+    );
 }
 
 #[test]
@@ -212,7 +242,10 @@ fn test_scheduling_contract_completion() {
         }],
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&contract, &obs_valid), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&contract, &obs_valid),
+        CompletionStatus::Complete
+    );
 }
 
 #[test]
@@ -227,19 +260,27 @@ fn test_clarification_and_approval_contracts() {
         yielded_question: Some("Which directory should I clean?".into()),
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&clar, &obs_clar), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&clar, &obs_clar),
+        CompletionStatus::Complete
+    );
 
     let obs_appr = CompletionObservation {
         yielded_approval: Some("Delete 5 files in C:\\temp?".into()),
         ..Default::default()
     };
-    assert_eq!(evaluate_completion(&appr, &obs_appr), CompletionStatus::Complete);
+    assert_eq!(
+        evaluate_completion(&appr, &obs_appr),
+        CompletionStatus::Complete
+    );
 }
 
 #[test]
 fn test_deterministic_rendering() {
     // Image retrieval deterministic rendering
-    let img_contract = CompletionContract::ImageRetrieval { require_direct_media: true };
+    let img_contract = CompletionContract::ImageRetrieval {
+        require_direct_media: true,
+    };
     let img_obs = CompletionObservation {
         validated_images: vec![ValidatedImage {
             url_or_path: "https://example.com/space.png".into(),
@@ -269,7 +310,10 @@ fn test_deterministic_rendering() {
 
     // Chat has no deterministic rendering (requires model summarization)
     let chat_contract = CompletionContract::Chat;
-    assert!(render_deterministic_completion(&chat_contract, &CompletionObservation::default()).is_none());
+    assert!(
+        render_deterministic_completion(&chat_contract, &CompletionObservation::default())
+            .is_none()
+    );
 }
 
 #[test]
@@ -289,26 +333,38 @@ fn test_contract_from_intent_mapping() {
 
     let mut intent = base_intent.clone();
     intent.completion = IntentCompletion::SourcedAnswer;
-    assert_eq!(contract_from_intent(&intent), CompletionContract::SourcedWeb { min_sources: 1 });
+    assert_eq!(
+        contract_from_intent(&intent),
+        CompletionContract::SourcedWeb { min_sources: 1 }
+    );
 
     intent.completion = IntentCompletion::ImageResult;
     assert_eq!(
         contract_from_intent(&intent),
-        CompletionContract::ImageRetrieval { require_direct_media: true }
+        CompletionContract::ImageRetrieval {
+            require_direct_media: true
+        }
     );
 
     intent.completion = IntentCompletion::Artifact;
     assert_eq!(
         contract_from_intent(&intent),
-        CompletionContract::ArtifactGeneration { require_explanation: true }
+        CompletionContract::ArtifactGeneration {
+            require_explanation: true
+        }
     );
 
     intent.completion = IntentCompletion::VerifiedChange;
     assert_eq!(
         contract_from_intent(&intent),
-        CompletionContract::RepositoryMutation { require_verification: true }
+        CompletionContract::RepositoryMutation {
+            require_verification: true
+        }
     );
 
     intent.completion = IntentCompletion::ScheduleState;
-    assert_eq!(contract_from_intent(&intent), CompletionContract::Scheduling);
+    assert_eq!(
+        contract_from_intent(&intent),
+        CompletionContract::Scheduling
+    );
 }

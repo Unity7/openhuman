@@ -1207,16 +1207,18 @@ async fn qwen_exact_route_multiple_provider_calls_pairing_and_single_execution()
 
 #[tokio::test]
 async fn loop_guard_state_persistence_and_conversation_replacement_preservation() {
+    use super::types::GooseCheckpoint;
     use goose_agent::machine::EffectHandler;
     use goose_agent::operation::ConversationEffect;
-    use super::types::GooseCheckpoint;
 
     let dir = tempfile::tempdir().unwrap();
     let session_id = "loop-guard-persistence-test";
     let store = Arc::new(FileGooseCheckpointStore::new(dir.path()));
 
     // 1. Backward compatibility: deserialize JSON without loop-guard fields
-    let mut legacy_val = serde_json::to_value(GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap()).unwrap();
+    let mut legacy_val =
+        serde_json::to_value(GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap())
+            .unwrap();
     let legacy_map = legacy_val.as_object_mut().unwrap();
     legacy_map.remove("last_call_signature");
     legacy_map.remove("last_failure_type");
@@ -1241,10 +1243,12 @@ async fn loop_guard_state_persistence_and_conversation_replacement_preservation(
     initial_ckpt.repeated_failure_count = 1;
     initial_ckpt.no_progress_count = 1;
     initial_ckpt.unavailable_routes = vec!["paid_generation".into()];
-    initial_ckpt.completion_state = Some(crate::agent::primary_orchestration::CompletionStatus::Incomplete {
-        reason: "awaiting file edit".into(),
-        needs_final_model_call: true,
-    });
+    initial_ckpt.completion_state = Some(
+        crate::agent::primary_orchestration::CompletionStatus::Incomplete {
+            reason: "awaiting file edit".into(),
+            needs_final_model_call: true,
+        },
+    );
     initial_ckpt.terminal_reason = Some("test_reason".into());
 
     // Insert into store
@@ -1272,14 +1276,21 @@ async fn loop_guard_state_persistence_and_conversation_replacement_preservation(
     let (tx, _rx) = tokio::sync::mpsc::channel(16);
     let emitter = goose_agent::operation::Emitter::new(tx, CancellationToken::new());
     let mut effects = vec![
-        super::types::OpenHumanEffect::SetLastCallSignature(Some("read_file:{\"path\":\"bar.rs\"}".into())),
+        super::types::OpenHumanEffect::SetLastCallSignature(Some(
+            "read_file:{\"path\":\"bar.rs\"}".into(),
+        )),
         super::types::OpenHumanEffect::RecordFailure("file_not_found".into()),
         super::types::OpenHumanEffect::IncrementNoProgress,
         super::types::OpenHumanEffect::MarkRouteUnavailable("expensive_search".into()),
-        super::types::OpenHumanEffect::SetCompletionState(Some(crate::agent::primary_orchestration::CompletionStatus::Complete)),
+        super::types::OpenHumanEffect::SetCompletionState(Some(
+            crate::agent::primary_orchestration::CompletionStatus::Complete,
+        )),
         super::types::OpenHumanEffect::SetTerminalReason(Some("completed_cleanly".into())),
     ];
-    runtime.apply_effects(&session, &mut effects, &emitter).await.unwrap();
+    runtime
+        .apply_effects(&session, &mut effects, &emitter)
+        .await
+        .unwrap();
 
     // Verify persisted state after effects
     let after_effects = fresh_store.load(session_id).await.unwrap();
@@ -1288,7 +1299,10 @@ async fn loop_guard_state_persistence_and_conversation_replacement_preservation(
         after_effects.last_call_signature.as_deref(),
         Some("read_file:{\"path\":\"bar.rs\"}")
     );
-    assert_eq!(after_effects.last_failure_type.as_deref(), Some("file_not_found"));
+    assert_eq!(
+        after_effects.last_failure_type.as_deref(),
+        Some("file_not_found")
+    );
     assert_eq!(after_effects.repeated_failure_count, 2);
     assert_eq!(after_effects.no_progress_count, 2);
     assert_eq!(
@@ -1309,11 +1323,16 @@ async fn loop_guard_state_persistence_and_conversation_replacement_preservation(
         id: session_id.to_string(),
         checkpoint: after_effects.clone(),
     };
-    let new_conv = GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap().conversation;
-    let mut replace_effects = vec![
-        super::types::OpenHumanEffect::Conversation(ConversationEffect::ReplaceConversation(new_conv)),
-    ];
-    runtime.apply_effects(&session2, &mut replace_effects, &emitter).await.unwrap();
+    let new_conv = GooseTurnAdapter::checkpoint_from_openhuman(&kickoff())
+        .unwrap()
+        .conversation;
+    let mut replace_effects = vec![super::types::OpenHumanEffect::Conversation(
+        ConversationEffect::ReplaceConversation(new_conv),
+    )];
+    runtime
+        .apply_effects(&session2, &mut replace_effects, &emitter)
+        .await
+        .unwrap();
 
     let after_replace = fresh_store.load(session_id).await.unwrap();
     assert_eq!(after_replace.revision, 2);
@@ -1341,10 +1360,7 @@ async fn loop_guard_state_persistence_and_conversation_replacement_preservation(
         after_replace.completion_state,
         after_effects.completion_state
     );
-    assert_eq!(
-        after_replace.terminal_reason,
-        after_effects.terminal_reason
-    );
+    assert_eq!(after_replace.terminal_reason, after_effects.terminal_reason);
 }
 
 struct FailingTool;
@@ -1380,9 +1396,12 @@ async fn loop_guard_unavailable_tool_stops_and_records_reason() {
         "turn",
         GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
     );
-    let model = Arc::new(ScriptedModel::new(vec![
-        named_tool_response("call-1", "non_existent_tool", "test", Usage::new(10, 2)),
-    ]));
+    let model = Arc::new(ScriptedModel::new(vec![named_tool_response(
+        "call-1",
+        "non_existent_tool",
+        "test",
+        Usage::new(10, 2),
+    )]));
     let calls = Arc::new(AtomicUsize::new(0));
     let outcome = adapter(
         store.clone(),
@@ -1397,9 +1416,15 @@ async fn loop_guard_unavailable_tool_stops_and_records_reason() {
     .unwrap();
 
     assert_eq!(outcome.stop_reason, GooseStopReason::UnavailableTool);
-    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("unavailable_tool"));
+    assert_eq!(
+        outcome.checkpoint.terminal_reason.as_deref(),
+        Some("unavailable_tool")
+    );
     let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
-    assert!(final_text.contains("not in active routes"), "Expected route explanation, got: {final_text}");
+    assert!(
+        final_text.contains("not in active routes"),
+        "Expected route explanation, got: {final_text}"
+    );
 }
 
 #[tokio::test]
@@ -1427,9 +1452,15 @@ async fn loop_guard_duplicate_signature_stops_and_records_reason() {
     .unwrap();
 
     assert_eq!(outcome.stop_reason, GooseStopReason::DuplicateSignature);
-    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("duplicate_signature"));
+    assert_eq!(
+        outcome.checkpoint.terminal_reason.as_deref(),
+        Some("duplicate_signature")
+    );
     let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
-    assert!(final_text.contains("duplicate call signature"), "Expected duplicate explanation, got: {final_text}");
+    assert!(
+        final_text.contains("duplicate call signature"),
+        "Expected duplicate explanation, got: {final_text}"
+    );
 }
 
 #[tokio::test]
@@ -1456,10 +1487,16 @@ async fn loop_guard_repeated_failure_stops_and_records_reason() {
     let outcome = adapter.run("turn").await.unwrap();
 
     assert_eq!(outcome.stop_reason, GooseStopReason::RepeatedFailure);
-    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("repeated_failure"));
+    assert_eq!(
+        outcome.checkpoint.terminal_reason.as_deref(),
+        Some("repeated_failure")
+    );
     assert_eq!(outcome.checkpoint.repeated_failure_count, 2);
     let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
-    assert!(final_text.contains("failed repeatedly"), "Expected failure explanation, got: {final_text}");
+    assert!(
+        final_text.contains("failed repeatedly"),
+        "Expected failure explanation, got: {final_text}"
+    );
 }
 
 #[tokio::test]
@@ -1487,10 +1524,16 @@ async fn loop_guard_no_progress_stops_and_records_reason() {
     .unwrap();
 
     assert_eq!(outcome.stop_reason, GooseStopReason::NoProgress);
-    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("no_progress"));
+    assert_eq!(
+        outcome.checkpoint.terminal_reason.as_deref(),
+        Some("no_progress")
+    );
     assert_eq!(outcome.checkpoint.no_progress_count, 2);
     let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
-    assert!(final_text.contains("without progress"), "Expected no-progress explanation, got: {final_text}");
+    assert!(
+        final_text.contains("without progress"),
+        "Expected no-progress explanation, got: {final_text}"
+    );
 }
 
 #[tokio::test]
@@ -1500,9 +1543,10 @@ async fn loop_guard_completion_contract_satisfied_records_completed() {
         "turn",
         GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
     );
-    let model = Arc::new(ScriptedModel::new(vec![
-        final_response("Here is the answer to your question.", Usage::new(15, 3)),
-    ]));
+    let model = Arc::new(ScriptedModel::new(vec![final_response(
+        "Here is the answer to your question.",
+        Usage::new(15, 3),
+    )]));
     let calls = Arc::new(AtomicUsize::new(0));
     let mut adapter = adapter(
         store.clone(),
@@ -1517,7 +1561,10 @@ async fn loop_guard_completion_contract_satisfied_records_completed() {
     let outcome = adapter.run("turn").await.unwrap();
 
     assert_eq!(outcome.stop_reason, GooseStopReason::Completed);
-    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("completed"));
+    assert_eq!(
+        outcome.checkpoint.terminal_reason.as_deref(),
+        Some("completed")
+    );
     assert_eq!(
         outcome.checkpoint.completion_state,
         Some(crate::agent::primary_orchestration::CompletionStatus::Complete)
@@ -1527,12 +1574,20 @@ async fn loop_guard_completion_contract_satisfied_records_completed() {
 #[test]
 fn terminal_route_failure_classification() {
     use super::tools::is_terminal_route_failure;
-    assert!(is_terminal_route_failure("USER_INSUFFICIENT_CREDITS: balance is zero"));
-    assert!(is_terminal_route_failure("This request requires more credits"));
+    assert!(is_terminal_route_failure(
+        "USER_INSUFFICIENT_CREDITS: balance is zero"
+    ));
+    assert!(is_terminal_route_failure(
+        "This request requires more credits"
+    ));
     assert!(is_terminal_route_failure("Insufficient Balance"));
     assert!(is_terminal_route_failure("Quota exceeded for model"));
-    assert!(is_terminal_route_failure("No active credentials for provider: custom_openai"));
-    assert!(is_terminal_route_failure("invalid_authentication_error: key revoked"));
+    assert!(is_terminal_route_failure(
+        "No active credentials for provider: custom_openai"
+    ));
+    assert!(is_terminal_route_failure(
+        "invalid_authentication_error: key revoked"
+    ));
     assert!(!is_terminal_route_failure("File not found: test.txt"));
     assert!(!is_terminal_route_failure("Network timeout after 5000ms"));
 }
@@ -1601,7 +1656,11 @@ fn same_boundary_alternative_retention_rules() {
     // Different operation fails
     assert!(!is_same_boundary_alternative(&search_free_a, &shell_tool));
 
-    let all_routes = vec![search_free_a.clone(), search_free_b.clone(), search_paid.clone()];
+    let all_routes = vec![
+        search_free_a.clone(),
+        search_free_b.clone(),
+        search_paid.clone(),
+    ];
     let retained = retain_authorized_alternatives(&all_routes, &["search_a".to_string()]);
     // search_b is retained, but search_a is excluded and search_paid (different monetary boundary) is excluded
     assert_eq!(retained.len(), 1);
@@ -1665,5 +1724,8 @@ async fn terminal_route_failure_marks_route_unavailable_and_blocks_subsequent_re
     // After call-1 failed with terminal error, credit_failing_tool was marked unavailable.
     // Call-2 then tried to request credit_failing_tool, which was stopped by UnavailableRequestGuard!
     assert_eq!(outcome.stop_reason, GooseStopReason::UnavailableTool);
-    assert!(outcome.checkpoint.unavailable_routes.contains(&"credit_failing_tool".to_string()));
+    assert!(outcome
+        .checkpoint
+        .unavailable_routes
+        .contains(&"credit_failing_tool".to_string()));
 }

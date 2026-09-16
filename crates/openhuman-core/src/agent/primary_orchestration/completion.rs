@@ -24,18 +24,10 @@ use super::intent::{IntentCompletion, RequestIntent};
 #[serde(rename_all = "snake_case")]
 pub enum CompletionContract {
     Chat,
-    SourcedWeb {
-        min_sources: usize,
-    },
-    ImageRetrieval {
-        require_direct_media: bool,
-    },
-    ArtifactGeneration {
-        require_explanation: bool,
-    },
-    RepositoryMutation {
-        require_verification: bool,
-    },
+    SourcedWeb { min_sources: usize },
+    ImageRetrieval { require_direct_media: bool },
+    ArtifactGeneration { require_explanation: bool },
+    RepositoryMutation { require_verification: bool },
     Scheduling,
     Clarification,
     Approval,
@@ -139,16 +131,16 @@ pub fn contract_from_intent(intent: &RequestIntent) -> CompletionContract {
     match intent.completion {
         IntentCompletion::FinalText => CompletionContract::Chat,
         IntentCompletion::SourcedAnswer => CompletionContract::SourcedWeb { min_sources: 1 },
-        IntentCompletion::ImageResult => {
-            CompletionContract::ImageRetrieval { require_direct_media: true }
-        }
-        IntentCompletion::Artifact => {
-            CompletionContract::ArtifactGeneration { require_explanation: true }
-        }
+        IntentCompletion::ImageResult => CompletionContract::ImageRetrieval {
+            require_direct_media: true,
+        },
+        IntentCompletion::Artifact => CompletionContract::ArtifactGeneration {
+            require_explanation: true,
+        },
         IntentCompletion::MemoryResult => CompletionContract::Chat,
-        IntentCompletion::VerifiedChange => {
-            CompletionContract::RepositoryMutation { require_verification: true }
-        }
+        IntentCompletion::VerifiedChange => CompletionContract::RepositoryMutation {
+            require_verification: true,
+        },
         IntentCompletion::ScheduleState => CompletionContract::Scheduling,
         IntentCompletion::DelegatedResult => CompletionContract::Chat,
     }
@@ -221,11 +213,15 @@ pub fn evaluate_completion(
             }
         }
 
-        CompletionContract::ImageRetrieval { require_direct_media } => {
+        CompletionContract::ImageRetrieval {
+            require_direct_media,
+        } => {
             if obs.validated_images.is_empty() {
                 if !obs.informational_tools_executed.is_empty() {
                     CompletionStatus::FalseCompletion {
-                        reason: "Navigation or search executed without validated image result rendered".into(),
+                        reason:
+                            "Navigation or search executed without validated image result rendered"
+                                .into(),
                     }
                 } else {
                     CompletionStatus::Incomplete {
@@ -245,7 +241,10 @@ pub fn evaluate_completion(
                         };
                     }
                     if *require_direct_media {
-                        let has_media_hint = img.mime_type.as_deref().is_some_and(|m| m.starts_with("image/"))
+                        let has_media_hint = img
+                            .mime_type
+                            .as_deref()
+                            .is_some_and(|m| m.starts_with("image/"))
                             || img.url_or_path.ends_with(".png")
                             || img.url_or_path.ends_with(".jpg")
                             || img.url_or_path.ends_with(".jpeg")
@@ -254,9 +253,7 @@ pub fn evaluate_completion(
                             || img.url_or_path.ends_with(".svg")
                             || img.url_or_path.starts_with("data:image/")
                             || img.url_or_path.starts_with("file://");
-                        if !has_media_hint && !img.source_origin.is_empty() {
-                            valid_count += 1;
-                        } else if has_media_hint {
+                        if has_media_hint || !img.source_origin.is_empty() {
                             valid_count += 1;
                         }
                     } else {
@@ -274,7 +271,9 @@ pub fn evaluate_completion(
             }
         }
 
-        CompletionContract::ArtifactGeneration { require_explanation } => {
+        CompletionContract::ArtifactGeneration {
+            require_explanation,
+        } => {
             if obs.generated_artifacts.is_empty() {
                 CompletionStatus::Incomplete {
                     reason: "No artifact generated".into(),
@@ -301,11 +300,14 @@ pub fn evaluate_completion(
             }
         }
 
-        CompletionContract::RepositoryMutation { require_verification } => {
+        CompletionContract::RepositoryMutation {
+            require_verification,
+        } => {
             if obs.repository_changes.is_empty() {
                 if !obs.informational_tools_executed.is_empty() {
                     CompletionStatus::Incomplete {
-                        reason: "Informational inspection only; repository mutation not recorded".into(),
+                        reason: "Informational inspection only; repository mutation not recorded"
+                            .into(),
                         needs_final_model_call: true,
                     }
                 } else {

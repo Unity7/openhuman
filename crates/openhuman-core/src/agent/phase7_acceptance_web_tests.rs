@@ -13,10 +13,7 @@ use serde_json::json;
 use super::*;
 use crate::agent::{
     goose::GooseStopReason,
-    primary_orchestration::{
-        capability::*,
-        completion::CompletionContract,
-    },
+    primary_orchestration::{capability::*, completion::CompletionContract},
 };
 
 #[tokio::test]
@@ -24,15 +21,13 @@ async fn current_news_search_and_synthesis_flow() {
     let mut harness = AcceptanceHarness::new();
     let turn_id = "turn-news-1";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("What is the latest news today?"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("What is the latest news today?"),
+        )
+        .unwrap(),
+    );
 
     let search_call_counter = Arc::new(AtomicUsize::new(0));
     let search_effect_counter = Arc::new(AtomicUsize::new(0));
@@ -45,7 +40,11 @@ async fn current_news_search_and_synthesis_flow() {
         CapabilitySideEffect::ExternalRead,
         search_call_counter.clone(),
         search_effect_counter.clone(),
-        |_args| Ok(ToolResult::success("Headline: AI breakthrough announced today. Sources: https://news.example.com/ai")),
+        |_args| {
+            Ok(ToolResult::success(
+                "Headline: AI breakthrough announced today. Sources: https://news.example.com/ai",
+            ))
+        },
     ));
     let search_route = search_tool.as_route(100);
 
@@ -101,15 +100,13 @@ async fn known_url_fetch_first_route_ordering() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-url-fetch";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Please read https://openhuman.ai/manifesto"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Please read https://openhuman.ai/manifesto"),
+        )
+        .unwrap(),
+    );
 
     let fetch_calls = Arc::new(AtomicUsize::new(0));
     let search_calls = Arc::new(AtomicUsize::new(0));
@@ -124,7 +121,11 @@ async fn known_url_fetch_first_route_ordering() {
         CapabilitySideEffect::ExternalRead,
         fetch_calls.clone(),
         effect_counter.clone(),
-        |_args| Ok(ToolResult::success("OpenHuman Manifesto: Autonomous intelligence.")),
+        |_args| {
+            Ok(ToolResult::success(
+                "OpenHuman Manifesto: Autonomous intelligence.",
+            ))
+        },
     ));
     let fetch_route = fetch_tool.as_route(100);
 
@@ -177,15 +178,13 @@ async fn image_retrieval_with_source_and_rendered_result() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-image-retrieval";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Find a diagram of the solar system"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Find a diagram of the solar system"),
+        )
+        .unwrap(),
+    );
 
     let calls = Arc::new(AtomicUsize::new(0));
     let effects = Arc::new(AtomicUsize::new(0));
@@ -199,11 +198,14 @@ async fn image_retrieval_with_source_and_rendered_result() {
         calls.clone(),
         effects.clone(),
         |_args| {
-            Ok(ToolResult::success(json!({
-                "url": "https://example.org/solar_system.png",
-                "source": "NASA Planetary Archive",
-                "title": "Solar System Diagram"
-            }).to_string()))
+            Ok(ToolResult::success(
+                json!({
+                    "url": "https://example.org/solar_system.png",
+                    "source": "NASA Planetary Archive",
+                    "title": "Solar System Diagram"
+                })
+                .to_string(),
+            ))
         },
     ));
     let image_route = image_retrieval_tool.as_route(100);
@@ -226,7 +228,9 @@ async fn image_retrieval_with_source_and_rendered_result() {
         harness.endpoint_counter.clone(),
     ));
 
-    let contract = CompletionContract::ImageRetrieval { require_direct_media: true };
+    let contract = CompletionContract::ImageRetrieval {
+        require_direct_media: true,
+    };
 
     let adapter = harness.build_adapter(
         model,
@@ -326,15 +330,13 @@ async fn zero_balance_terminal_result_and_same_boundary_free_fallback() {
     let harness = AcceptanceHarness::new();
     let turn_id = "turn-search-fallback";
 
-    harness
-        .store
-        .insert(
-            turn_id,
-            crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
-                &AcceptanceHarness::initial_messages("Find local news"),
-            )
-            .unwrap(),
-        );
+    harness.store.insert(
+        turn_id,
+        crate::agent::goose::GooseTurnAdapter::checkpoint_from_openhuman(
+            &AcceptanceHarness::initial_messages("Find local news"),
+        )
+        .unwrap(),
+    );
 
     let paid_calls = Arc::new(AtomicUsize::new(0));
     let free_calls = Arc::new(AtomicUsize::new(0));
@@ -350,7 +352,11 @@ async fn zero_balance_terminal_result_and_same_boundary_free_fallback() {
         CapabilitySideEffect::ExternalRead,
         paid_calls.clone(),
         effects.clone(),
-        |_args| Ok(ToolResult::error("USER_INSUFFICIENT_CREDITS: balance is zero")),
+        |_args| {
+            Ok(ToolResult::error(
+                "USER_INSUFFICIENT_CREDITS: balance is zero",
+            ))
+        },
     ));
     let paid_route = paid_tool.as_route(100);
 
@@ -408,7 +414,10 @@ async fn zero_balance_terminal_result_and_same_boundary_free_fallback() {
     assert_eq!(free_calls.load(Ordering::SeqCst), 1);
     assert_eq!(harness.endpoint_counter.load(Ordering::SeqCst), 3);
     // Verified: paid_search was recorded in unavailable_routes
-    assert!(outcome.checkpoint.unavailable_routes.contains(&"paid_search".to_string()));
+    assert!(outcome
+        .checkpoint
+        .unavailable_routes
+        .contains(&"paid_search".to_string()));
 }
 
 #[test]
@@ -455,7 +464,13 @@ fn no_modality_crossing_enforced_by_same_boundary_alternative() {
     });
 
     // Cannot cross modality from Text to Image
-    assert!(!is_same_boundary_alternative(&web_search_route, &image_gen_route));
+    assert!(!is_same_boundary_alternative(
+        &web_search_route,
+        &image_gen_route
+    ));
     // Cannot cross operation/side-effect from SearchWeb/Read to ExecuteCommand/Write
-    assert!(!is_same_boundary_alternative(&web_search_route, &shell_route));
+    assert!(!is_same_boundary_alternative(
+        &web_search_route,
+        &shell_route
+    ));
 }

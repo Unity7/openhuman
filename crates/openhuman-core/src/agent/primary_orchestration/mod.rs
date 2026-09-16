@@ -21,9 +21,9 @@ pub use catalog::{
     CatalogRouteClass,
 };
 pub use completion::{
-    contract_from_intent, evaluate_completion, render_deterministic_completion,
-    CompletionContract, CompletionObservation, CompletionStatus, GeneratedArtifact,
-    RepositoryChangeRecord, ScheduleRecord, ValidatedImage, VerificationStatus,
+    contract_from_intent, evaluate_completion, render_deterministic_completion, CompletionContract,
+    CompletionObservation, CompletionStatus, GeneratedArtifact, RepositoryChangeRecord,
+    ScheduleRecord, ValidatedImage, VerificationStatus,
 };
 pub use intent::{resolve_request_intent, IntentCompletion, PrimaryIntentFamily, RequestIntent};
 pub use mode::{
