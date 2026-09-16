@@ -381,6 +381,17 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib qwen_tests`;
   `git diff --check`.
 
+### G5-AX — Qwen normalizer compile seam (wave 5.0, lane protocol-repair)
+
+- Depends: G5-A.
+- Change: `crates/openhuman-core/src/agent/goose/qwen.rs`.
+- Context: none.
+- Remove the unsupported `PartialEq` derive from `NormalizedQwenResponse`;
+  `tinyinference::ModelResponse` does not implement that trait. Preserve behavior
+  and every other derive.
+- Verify: `cargo check --manifest-path Cargo.toml -p openhuman --lib`;
+  `git diff --check`.
+
 ### G5-C — persisted protocol correction state (wave 5.0, lane persistence)
 
 - Depends: Gate 4 passed.
