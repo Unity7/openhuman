@@ -364,6 +364,19 @@ impl Agent {
                 ),
                 GooseStopReason::Yielded => anyhow!("The turn paused before producing an answer."),
                 GooseStopReason::FinalAnswer => anyhow!("The model returned an empty response."),
+                GooseStopReason::DuplicateSignature => {
+                    anyhow!("The turn was stopped by loop guard: identical call signature repeated.")
+                }
+                GooseStopReason::RepeatedFailure => {
+                    anyhow!("The turn was stopped by loop guard: repeated typed tool failure.")
+                }
+                GooseStopReason::UnavailableTool => {
+                    anyhow!("The turn was stopped by loop guard: requested tool is unavailable.")
+                }
+                GooseStopReason::NoProgress => {
+                    anyhow!("The turn was stopped by loop guard: no progress across multiple passes.")
+                }
+                GooseStopReason::Completed => anyhow!("The turn completed."),
             })?;
 
         self.history

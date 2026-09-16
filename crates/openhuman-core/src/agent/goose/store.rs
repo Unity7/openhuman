@@ -349,6 +349,13 @@ fn apply_conversation_effect(
             rebuilt.usage = checkpoint.usage.clone();
             rebuilt.protocol_correction_count = checkpoint.protocol_correction_count;
             rebuilt.terminal_protocol_failure = checkpoint.terminal_protocol_failure;
+            rebuilt.last_call_signature = checkpoint.last_call_signature.clone();
+            rebuilt.last_failure_type = checkpoint.last_failure_type.clone();
+            rebuilt.repeated_failure_count = checkpoint.repeated_failure_count;
+            rebuilt.no_progress_count = checkpoint.no_progress_count;
+            rebuilt.unavailable_routes = checkpoint.unavailable_routes.clone();
+            rebuilt.completion_state = checkpoint.completion_state.clone();
+            rebuilt.terminal_reason = checkpoint.terminal_reason.clone();
             for message in conversation.messages() {
                 index_message(&mut rebuilt, message)?;
             }
@@ -356,6 +363,13 @@ fn apply_conversation_effect(
             checkpoint.actions = rebuilt.actions;
             checkpoint.protocol_correction_count = rebuilt.protocol_correction_count;
             checkpoint.terminal_protocol_failure = rebuilt.terminal_protocol_failure;
+            checkpoint.last_call_signature = rebuilt.last_call_signature;
+            checkpoint.last_failure_type = rebuilt.last_failure_type;
+            checkpoint.repeated_failure_count = rebuilt.repeated_failure_count;
+            checkpoint.no_progress_count = rebuilt.no_progress_count;
+            checkpoint.unavailable_routes = rebuilt.unavailable_routes;
+            checkpoint.completion_state = rebuilt.completion_state;
+            checkpoint.terminal_reason = rebuilt.terminal_reason;
         }
         ConversationEffect::PatchToolRequestMeta {
             tool_call_id,
@@ -478,6 +492,38 @@ impl EffectHandler<GooseSession, OpenHumanEffect> for CheckpointRuntime {
                 }
                 OpenHumanEffect::SetTerminalProtocolFailure => {
                     next.terminal_protocol_failure = true;
+                }
+                OpenHumanEffect::SetLastCallSignature(signature) => {
+                    next.last_call_signature = signature.clone();
+                }
+                OpenHumanEffect::RecordFailure(failure_type) => {
+                    if next.last_failure_type.as_deref() == Some(failure_type.as_str()) {
+                        next.repeated_failure_count = next.repeated_failure_count.saturating_add(1);
+                    } else {
+                        next.last_failure_type = Some(failure_type.clone());
+                        next.repeated_failure_count = 1;
+                    }
+                }
+                OpenHumanEffect::ResetFailure => {
+                    next.last_failure_type = None;
+                    next.repeated_failure_count = 0;
+                }
+                OpenHumanEffect::IncrementNoProgress => {
+                    next.no_progress_count = next.no_progress_count.saturating_add(1);
+                }
+                OpenHumanEffect::ResetNoProgress => {
+                    next.no_progress_count = 0;
+                }
+                OpenHumanEffect::MarkRouteUnavailable(route) => {
+                    if !next.unavailable_routes.contains(route) {
+                        next.unavailable_routes.push(route.clone());
+                    }
+                }
+                OpenHumanEffect::SetCompletionState(state) => {
+                    next.completion_state = state.clone();
+                }
+                OpenHumanEffect::SetTerminalReason(reason) => {
+                    next.terminal_reason = reason.clone();
                 }
             }
         }

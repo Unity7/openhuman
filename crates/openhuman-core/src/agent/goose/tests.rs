@@ -1202,3 +1202,145 @@ async fn qwen_exact_route_multiple_provider_calls_pairing_and_single_execution()
     assert_eq!(resumed.checkpoint.actions.len(), 1);
     assert!(resumed.checkpoint.actions["call-1"].observation.is_some());
 }
+
+#[tokio::test]
+async fn loop_guard_state_persistence_and_conversation_replacement_preservation() {
+    use goose_agent::machine::EffectHandler;
+    use goose_agent::operation::ConversationEffect;
+    use super::types::GooseCheckpoint;
+
+    let dir = tempfile::tempdir().unwrap();
+    let session_id = "loop-guard-persistence-test";
+    let store = Arc::new(FileGooseCheckpointStore::new(dir.path()));
+
+    // 1. Backward compatibility: deserialize JSON without loop-guard fields
+    let mut legacy_val = serde_json::to_value(GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap()).unwrap();
+    let legacy_map = legacy_val.as_object_mut().unwrap();
+    legacy_map.remove("last_call_signature");
+    legacy_map.remove("last_failure_type");
+    legacy_map.remove("repeated_failure_count");
+    legacy_map.remove("no_progress_count");
+    legacy_map.remove("unavailable_routes");
+    legacy_map.remove("completion_state");
+    legacy_map.remove("terminal_reason");
+    let legacy_ckpt: GooseCheckpoint = serde_json::from_value(legacy_val).unwrap();
+    assert_eq!(legacy_ckpt.last_call_signature, None);
+    assert_eq!(legacy_ckpt.last_failure_type, None);
+    assert_eq!(legacy_ckpt.repeated_failure_count, 0);
+    assert_eq!(legacy_ckpt.no_progress_count, 0);
+    assert!(legacy_ckpt.unavailable_routes.is_empty());
+    assert_eq!(legacy_ckpt.completion_state, None);
+    assert_eq!(legacy_ckpt.terminal_reason, None);
+
+    // 2. Build initial checkpoint with loop guard state
+    let mut initial_ckpt = GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap();
+    initial_ckpt.last_call_signature = Some("read_file:{\"path\":\"foo.rs\"}".into());
+    initial_ckpt.last_failure_type = Some("file_not_found".into());
+    initial_ckpt.repeated_failure_count = 1;
+    initial_ckpt.no_progress_count = 1;
+    initial_ckpt.unavailable_routes = vec!["paid_generation".into()];
+    initial_ckpt.completion_state = Some(crate::agent::primary_orchestration::CompletionStatus::Incomplete {
+        reason: "awaiting file edit".into(),
+        needs_final_model_call: true,
+    });
+    initial_ckpt.terminal_reason = Some("test_reason".into());
+
+    // Insert into store
+    store.insert(session_id, initial_ckpt.clone()).unwrap();
+
+    // 3. Reload from fresh store handle and assert all fields survived exactly
+    let fresh_store = Arc::new(FileGooseCheckpointStore::new(dir.path()));
+    let loaded = fresh_store.load(session_id).await.unwrap();
+    assert_eq!(loaded.last_call_signature, initial_ckpt.last_call_signature);
+    assert_eq!(loaded.last_failure_type, initial_ckpt.last_failure_type);
+    assert_eq!(loaded.repeated_failure_count, 1);
+    assert_eq!(loaded.no_progress_count, 1);
+    assert_eq!(loaded.unavailable_routes, vec!["paid_generation"]);
+    assert_eq!(loaded.completion_state, initial_ckpt.completion_state);
+    assert_eq!(loaded.terminal_reason, Some("test_reason".into()));
+
+    // 4. Test effect application via CheckpointRuntime
+    let runtime = super::store::CheckpointRuntime {
+        store: fresh_store.clone(),
+    };
+    let session = super::types::GooseSession {
+        id: session_id.to_string(),
+        checkpoint: loaded.clone(),
+    };
+    let (tx, _rx) = tokio::sync::mpsc::channel(16);
+    let emitter = goose_agent::operation::Emitter::new(tx, CancellationToken::new());
+    let mut effects = vec![
+        super::types::OpenHumanEffect::SetLastCallSignature(Some("read_file:{\"path\":\"bar.rs\"}".into())),
+        super::types::OpenHumanEffect::RecordFailure("file_not_found".into()),
+        super::types::OpenHumanEffect::IncrementNoProgress,
+        super::types::OpenHumanEffect::MarkRouteUnavailable("expensive_search".into()),
+        super::types::OpenHumanEffect::SetCompletionState(Some(crate::agent::primary_orchestration::CompletionStatus::Complete)),
+        super::types::OpenHumanEffect::SetTerminalReason(Some("completed_cleanly".into())),
+    ];
+    runtime.apply_effects(&session, &mut effects, &emitter).await.unwrap();
+
+    // Verify persisted state after effects
+    let after_effects = fresh_store.load(session_id).await.unwrap();
+    assert_eq!(after_effects.revision, 1);
+    assert_eq!(
+        after_effects.last_call_signature.as_deref(),
+        Some("read_file:{\"path\":\"bar.rs\"}")
+    );
+    assert_eq!(after_effects.last_failure_type.as_deref(), Some("file_not_found"));
+    assert_eq!(after_effects.repeated_failure_count, 2);
+    assert_eq!(after_effects.no_progress_count, 2);
+    assert_eq!(
+        after_effects.unavailable_routes,
+        vec!["paid_generation", "expensive_search"]
+    );
+    assert_eq!(
+        after_effects.completion_state,
+        Some(crate::agent::primary_orchestration::CompletionStatus::Complete)
+    );
+    assert_eq!(
+        after_effects.terminal_reason.as_deref(),
+        Some("completed_cleanly")
+    );
+
+    // 5. Test ReplaceConversation effect preserves loop guard state
+    let session2 = super::types::GooseSession {
+        id: session_id.to_string(),
+        checkpoint: after_effects.clone(),
+    };
+    let new_conv = GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap().conversation;
+    let mut replace_effects = vec![
+        super::types::OpenHumanEffect::Conversation(ConversationEffect::ReplaceConversation(new_conv)),
+    ];
+    runtime.apply_effects(&session2, &mut replace_effects, &emitter).await.unwrap();
+
+    let after_replace = fresh_store.load(session_id).await.unwrap();
+    assert_eq!(after_replace.revision, 2);
+    assert_eq!(
+        after_replace.last_call_signature,
+        after_effects.last_call_signature
+    );
+    assert_eq!(
+        after_replace.last_failure_type,
+        after_effects.last_failure_type
+    );
+    assert_eq!(
+        after_replace.repeated_failure_count,
+        after_effects.repeated_failure_count
+    );
+    assert_eq!(
+        after_replace.no_progress_count,
+        after_effects.no_progress_count
+    );
+    assert_eq!(
+        after_replace.unavailable_routes,
+        after_effects.unavailable_routes
+    );
+    assert_eq!(
+        after_replace.completion_state,
+        after_effects.completion_state
+    );
+    assert_eq!(
+        after_replace.terminal_reason,
+        after_effects.terminal_reason
+    );
+}

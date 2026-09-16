@@ -44,6 +44,20 @@ pub struct GooseCheckpoint {
     pub protocol_correction_count: u32,
     #[serde(default)]
     pub terminal_protocol_failure: bool,
+    #[serde(default)]
+    pub last_call_signature: Option<String>,
+    #[serde(default)]
+    pub last_failure_type: Option<String>,
+    #[serde(default)]
+    pub repeated_failure_count: u32,
+    #[serde(default)]
+    pub no_progress_count: u32,
+    #[serde(default)]
+    pub unavailable_routes: Vec<String>,
+    #[serde(default)]
+    pub completion_state: Option<crate::agent::primary_orchestration::CompletionStatus>,
+    #[serde(default)]
+    pub terminal_reason: Option<String>,
 }
 
 impl GooseCheckpoint {
@@ -55,6 +69,13 @@ impl GooseCheckpoint {
             usage: GooseUsage::default(),
             protocol_correction_count: 0,
             terminal_protocol_failure: false,
+            last_call_signature: None,
+            last_failure_type: None,
+            repeated_failure_count: 0,
+            no_progress_count: 0,
+            unavailable_routes: Vec::new(),
+            completion_state: None,
+            terminal_reason: None,
         }
     }
 
@@ -71,12 +92,18 @@ impl GooseCheckpoint {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GooseStopReason {
     FinalAnswer,
     Cancelled,
     CallCeiling,
     Yielded,
+    DuplicateSignature,
+    RepeatedFailure,
+    UnavailableTool,
+    NoProgress,
+    Completed,
 }
 
 impl GooseStopReason {
@@ -86,6 +113,11 @@ impl GooseStopReason {
             Self::Cancelled => "cancelled",
             Self::CallCeiling => "call_ceiling",
             Self::Yielded => "yielded",
+            Self::DuplicateSignature => "duplicate_signature",
+            Self::RepeatedFailure => "repeated_failure",
+            Self::UnavailableTool => "unavailable_tool",
+            Self::NoProgress => "no_progress",
+            Self::Completed => "completed",
         }
     }
 }
@@ -109,6 +141,14 @@ pub(super) enum OpenHumanEffect {
     },
     IncrementProtocolCorrection,
     SetTerminalProtocolFailure,
+    SetLastCallSignature(Option<String>),
+    RecordFailure(String),
+    ResetFailure,
+    IncrementNoProgress,
+    ResetNoProgress,
+    MarkRouteUnavailable(String),
+    SetCompletionState(Option<crate::agent::primary_orchestration::CompletionStatus>),
+    SetTerminalReason(Option<String>),
 }
 
 impl From<goose_provider_types::conversation::message::Message> for OpenHumanEffect {
