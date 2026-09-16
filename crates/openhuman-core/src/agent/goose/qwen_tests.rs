@@ -1,7 +1,7 @@
 use crate::agent::goose::qwen::{normalize_qwen_response, QwenInvalidCall};
 use tinyinference::{
     message::{AssistantMessage, ContentBlock},
-    model::ModelResponse,
+    model::{ModelResolutionSource, ModelResponse, ResolvedModel},
     tool::{ToolCall, ToolSchema},
 };
 
@@ -59,7 +59,7 @@ fn make_response(content: Vec<ContentBlock>, tool_calls: Vec<ToolCall>) -> Model
         usage: Default::default(),
         finish_reason: Default::default(),
         raw: Default::default(),
-        resolved_model: Some("qwen-2.5-72b".to_string()),
+        resolved_model: None,
         continue_turn: Default::default(),
         served_from_cache: Default::default(),
     }
@@ -640,7 +640,11 @@ fn test_response_metadata_and_usage_preserved() {
         vec![],
     );
     response.message.id = Some("assistant-msg-custom-id-789".to_string());
-    response.resolved_model = Some("qwen-2.5-coder-32b-instruct".to_string());
+    response.resolved_model = Some(ResolvedModel {
+        name: "qwen-2.5-coder-32b-instruct".to_string(),
+        requested: None,
+        source: ModelResolutionSource::RegistryDefault,
+    });
     response.raw = Some(serde_json::json!({
         "provider": "vllm",
         "custom_metric": 42
