@@ -204,7 +204,7 @@ pub fn normalize_qwen_response(
         }
     }
 
-    let full_text = raw_prose_parts.join("\n");
+    let full_text = raw_prose_parts.concat();
 
     // 2. Native structured calls check.
     if !response.message.tool_calls.is_empty() {
@@ -635,6 +635,13 @@ fn strip_markup_for_visible_text(text: &str) -> String {
         let after_open = &rest[start + "<tool_call>".len()..];
         if let Some(end) = after_open.find("</tool_call>") {
             rest = &after_open[end + "</tool_call>".len()..];
+            if cleaned.ends_with('\n') {
+                if let Some(stripped) = rest.strip_prefix("\r\n") {
+                    rest = stripped;
+                } else if let Some(stripped) = rest.strip_prefix('\n') {
+                    rest = stripped;
+                }
+            }
         } else {
             rest = "";
             break;
