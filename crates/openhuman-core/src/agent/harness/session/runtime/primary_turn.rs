@@ -315,6 +315,7 @@ impl Agent {
             })
             .collect::<Vec<_>>()
             .join(",");
+        let contract = crate::agent::primary_orchestration::completion::contract_from_intent(&intent);
         let adapter = GooseTurnAdapter {
             store: store_dyn,
             model: models.primary,
@@ -329,7 +330,7 @@ impl Agent {
             max_output_tokens: None,
             max_primary_calls: mode.max_primary_calls(),
             max_no_progress_calls: 2,
-            contract: None,
+            contract: Some(contract),
         };
         let outcome = adapter.run(checkpoint_id).await?;
         tracing::info!(
@@ -337,6 +338,7 @@ impl Agent {
             routes = %route_names,
             monetary_boundaries = %monetary_boundaries,
             stop_reason = outcome.stop_reason.as_str(),
+            terminal_reason = outcome.checkpoint.terminal_reason.as_deref().unwrap_or(""),
             context_window = context_window.unwrap_or(0),
             latest_context_occupancy = outcome.checkpoint.usage.latest_primary_input_tokens,
             cumulative_input_tokens = outcome.checkpoint.usage.cumulative_input_tokens,
@@ -378,7 +380,7 @@ impl Agent {
                 GooseStopReason::NoProgress => {
                     anyhow!("The turn was stopped by loop guard: no progress across multiple passes.")
                 }
-                GooseStopReason::Completed => anyhow!("The turn completed."),
+                GooseStopReason::Completed => anyhow!("The turn produced no final assistant text."),
             })?;
 
         self.history
