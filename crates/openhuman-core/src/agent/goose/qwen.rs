@@ -463,6 +463,55 @@ pub fn normalize_qwen_tool_response(
     normalize_qwen_response(response, advertised_tools)
 }
 
+/// Check whether a provider and model pair matches the exact local Qwen route.
+pub fn is_local_qwen_route(provider_id: &str, model_name: &str) -> bool {
+    let binding = format!("{provider_id}:{model_name}");
+    binding == crate::agent::primary_orchestration::LOCAL_QWEN_PROVIDER_BINDING
+}
+
+/// Pure schema-informed correction builder accepting advertised tool schemas.
+///
+/// Instructs the model to return either direct final text or exactly one canonical
+/// tool-call object containing exact `name` and object `arguments`, enumerating only
+/// each advertised exact name and its parameter JSON schema, and stating that missing
+/// names, arguments, or required values must not be invented. Never accepts or echoes
+/// invalid model payload or user content.
+pub fn build_protocol_correction_prompt(advertised_tools: &[ToolSchema]) -> String {
+    let mut prompt = String::from(
+        "Your previous response did not produce a valid tool call.\n\
+Please return either direct final text answering the user or exactly one canonical tool-call object containing exact \"name\" and object \"arguments\".\n\
+Do not invent missing tool names, arguments, or required values.\n\n\
+Permitted tools and their parameter JSON schemas:\n",
+    );
+
+    if advertised_tools.is_empty() {
+        prompt.push_str("(No tools are currently available. Please provide direct final text.)\n");
+    } else {
+        for tool in advertised_tools {
+            let schema_str =
+                serde_json::to_string(&tool.parameters).unwrap_or_else(|_| "{}".to_string());
+            prompt.push_str(&format!(
+                "- Tool name: \"{}\"\n  Parameters schema: {}\n",
+                tool.name, schema_str
+            ));
+        }
+    }
+
+    prompt.push_str(
+        "\nIf calling a tool, use the canonical format:\n\
+<tool_call>\n\
+{\"name\": \"<exact_tool_name>\", \"arguments\": { ... }}\n\
+</tool_call>\n",
+    );
+
+    prompt
+}
+
+/// Pure constant terminal-answer helper returning clear user-safe text.
+pub fn protocol_failure_terminal_answer() -> &'static str {
+    "The tool-call format remained invalid and no action was taken."
+}
+
 fn validate_tool_arguments(
     schema: &ToolSchema,
     name: &str,
