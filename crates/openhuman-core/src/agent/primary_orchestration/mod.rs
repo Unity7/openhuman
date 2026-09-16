@@ -5,6 +5,7 @@
 
 pub mod capability;
 pub mod catalog;
+pub mod completion;
 pub mod intent;
 mod mode;
 pub mod planner;
@@ -19,6 +20,11 @@ pub use catalog::{
     build_capability_catalog, CapabilityCatalog, CapabilityCatalogError, CapabilityCatalogInputs,
     CatalogRouteClass,
 };
+pub use completion::{
+    contract_from_intent, evaluate_completion, render_deterministic_completion,
+    CompletionContract, CompletionObservation, CompletionStatus, GeneratedArtifact,
+    RepositoryChangeRecord, ScheduleRecord, ValidatedImage, VerificationStatus,
+};
 pub use intent::{resolve_request_intent, IntentCompletion, PrimaryIntentFamily, RequestIntent};
 pub use mode::{
     resolve_orchestration_engine, resolve_primary_turn_mode, ModeResolutionInput, PrimaryTurnMode,
@@ -32,3 +38,7 @@ pub(crate) use runtime::{
 #[cfg(test)]
 #[path = "gate4_tests.rs"]
 mod gate4_tests;
+
+#[cfg(test)]
+#[path = "completion_tests.rs"]
+mod completion_tests;
