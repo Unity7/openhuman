@@ -299,13 +299,13 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose::tests`;
   `git diff --check`.
 
-### G4-NX — Goose rejection observation assertions (wave 4.6, lane Goose)
+### G4-NX — Goose rejection outcome assertions (wave 4.6, lane Goose)
 
 - Depends: G4-N.
 - Change: `crates/openhuman-core/src/agent/goose/tests.rs`.
 - Context: `crates/openhuman-core/src/agent/goose/tools.rs`.
-- Assert omitted and unplanned calls through Goose's durable failed-observation
-  result rather than expecting the state-machine run itself to fail. Preserve
+- Assert omitted and unplanned calls through Goose's fail-closed yielded
+  outcome rather than expecting the state-machine run itself to fail. Preserve
   zero authorization and zero execution assertions.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose::tests`;
   `git diff --check`.
