@@ -429,9 +429,35 @@ shared module file run only after the preceding integration commit.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib qwen_tests`;
   `git diff --check`.
 
+This combined lane was superseded after its isolated worker timed out with no
+accepted patch. Execute G5-D1 then G5-D2 instead.
+
+### G5-D1 — Qwen correction text helpers (wave 5.2, lane protocol-helper)
+
+- Depends: G5-B, G5-C.
+- Change: `crates/openhuman-core/src/agent/goose/qwen.rs`.
+- Context: `crates/openhuman-core/src/agent/primary_orchestration/mode.rs`.
+- Add pure exact-binding, schema-informed hidden-correction, and raw-markup-free
+  terminal-failure text helpers. Do not echo invalid payloads or infer values.
+- Verify: `cargo check --manifest-path Cargo.toml -p openhuman --lib`;
+  `git diff --check`.
+
+### G5-D2 — exact-route inference effect flow (wave 5.2, lane protocol-runtime)
+
+- Depends: G5-D1.
+- Change: `crates/openhuman-core/src/agent/goose/inference.rs`.
+- Context: `crates/openhuman-core/src/agent/goose/qwen.rs`;
+  `crates/openhuman-core/src/agent/goose/types.rs`;
+  `crates/openhuman-core/src/agent/goose/runner.rs`.
+- Normalize only the exact local binding after complete invocation. Persist one
+  hidden schema-informed correction and re-enter Goose; on another invalid call
+  persist one clear terminal answer. Preserve mechanical behavior elsewhere.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib qwen_tests`;
+  `git diff --check`.
+
 ### G5-E — correction, pairing, and resume fixtures (wave 5.3, lane acceptance)
 
-- Depends: G5-D.
+- Depends: G5-D2.
 - Change: `crates/openhuman-core/src/agent/goose/tests.rs`;
   `crates/openhuman-core/src/agent/goose/qwen_tests.rs`.
 - Context: `crates/openhuman-core/src/agent/goose/store.rs`;
