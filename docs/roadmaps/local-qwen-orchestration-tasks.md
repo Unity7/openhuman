@@ -469,6 +469,31 @@ accepted patch. Execute G5-D1 then G5-D2 instead.
 - Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose`;
   `git diff --check`.
 
+Execute this acceptance lane as the two disjoint atomic lanes G5-E1 and G5-E2.
+
+### G5-E1 — Qwen protocol boundary fixtures (wave 5.3, lane acceptance-protocol)
+
+- Depends: G5-D2.
+- Change: `crates/openhuman-core/src/agent/goose/qwen_tests.rs`.
+- Context: `crates/openhuman-core/src/agent/goose/qwen.rs`;
+  `crates/openhuman-core/src/agent/goose/inference.rs`.
+- Prove exact route matching, schema-only correction text, safe terminal text,
+  one surviving action, and no raw markup in normalized visible output.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib qwen_tests`;
+  `git diff --check`.
+
+### G5-E2 — correction persistence and pairing fixtures (wave 5.3, lane acceptance-state)
+
+- Depends: G5-D2.
+- Change: `crates/openhuman-core/src/agent/goose/tests.rs`.
+- Context: `crates/openhuman-core/src/agent/goose/store.rs`;
+  `crates/openhuman-core/src/agent/goose/runner.rs`.
+- Prove one correction maximum across a fresh file-store handle, a second
+  invalid response terminates, every accepted action has one result, and resume
+  creates no duplicate effect/orphan or raw persisted markup.
+- Verify: `cargo test --manifest-path Cargo.toml -p openhuman --lib agent::goose::tests`;
+  `git diff --check`.
+
 ## Gate 6 — completion, guards, and use cases
 
 ### G6-A — typed completion contracts (wave 6.0, lane completion)
