@@ -117,7 +117,7 @@ impl std::fmt::Display for QwenInvalidCall {
 impl std::error::Error for QwenInvalidCall {}
 
 /// Result of Qwen response normalization.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct NormalizedQwenResponse {
     pub response: ModelResponse,
     pub invalid_call: Option<QwenInvalidCall>,
