@@ -328,6 +328,8 @@ impl Agent {
             cancel: tokio_util::sync::CancellationToken::new(),
             max_output_tokens: None,
             max_primary_calls: mode.max_primary_calls(),
+            max_no_progress_calls: 2,
+            contract: None,
         };
         let outcome = adapter.run(checkpoint_id).await?;
         tracing::info!(

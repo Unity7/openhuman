@@ -112,7 +112,7 @@ fn marked_role(message: &GooseMessage) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
 }
 
-fn rmcp_result_text(result: &CallToolResult) -> String {
+pub(super) fn rmcp_result_text(result: &CallToolResult) -> String {
     result
         .content
         .iter()

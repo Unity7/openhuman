@@ -261,6 +261,8 @@ fn adapter_with_snapshots_and_routes(
         cancel,
         max_output_tokens: Some(64),
         max_primary_calls: 12,
+        max_no_progress_calls: 2,
+        contract: None,
     }
 }
 
@@ -835,7 +837,7 @@ async fn tool_present_in_either_snapshot_but_omitted_from_routes_is_neither_adve
     );
 
     let outcome = adapter.run("omitted-durable").await.unwrap();
-    assert_eq!(outcome.stop_reason, GooseStopReason::Yielded);
+    assert_eq!(outcome.stop_reason, GooseStopReason::UnavailableTool);
     assert!(outcome.checkpoint.actions.contains_key("call-omitted"));
     let action = &outcome.checkpoint.actions["call-omitted"];
     assert!(action.observation.is_none());
@@ -870,7 +872,7 @@ async fn tool_present_in_either_snapshot_but_omitted_from_routes_is_neither_adve
         CancellationToken::new(),
     );
     let outcome_synth = adapter_synth.run("omitted-synth").await.unwrap();
-    assert_eq!(outcome_synth.stop_reason, GooseStopReason::Yielded);
+    assert_eq!(outcome_synth.stop_reason, GooseStopReason::UnavailableTool);
     assert!(outcome_synth.checkpoint.actions.contains_key("call-synth"));
     let action_synth = &outcome_synth.checkpoint.actions["call-synth"];
     assert!(action_synth.observation.is_none());
@@ -930,7 +932,7 @@ async fn rejected_unplanned_call_reaches_neither_security_authorization_nor_exec
     );
 
     let outcome = adapter.run("unplanned").await.unwrap();
-    assert_eq!(outcome.stop_reason, GooseStopReason::Yielded);
+    assert_eq!(outcome.stop_reason, GooseStopReason::UnavailableTool);
     assert!(outcome.checkpoint.actions.contains_key("call-unplanned"));
     let action = &outcome.checkpoint.actions["call-unplanned"];
     assert!(action.observation.is_none());
@@ -1342,5 +1344,182 @@ async fn loop_guard_state_persistence_and_conversation_replacement_preservation(
     assert_eq!(
         after_replace.terminal_reason,
         after_effects.terminal_reason
+    );
+}
+
+struct FailingTool;
+
+#[async_trait]
+impl Tool for FailingTool {
+    fn name(&self) -> &'static str {
+        "failing_tool"
+    }
+
+    fn description(&self) -> &'static str {
+        "A tool that always returns an error"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "key": { "type": "string" }
+            }
+        })
+    }
+
+    async fn execute(&self, _arguments: serde_json::Value) -> Result<ToolResult> {
+        Ok(ToolResult::error("persistent server failure"))
+    }
+}
+
+#[tokio::test]
+async fn loop_guard_unavailable_tool_stops_and_records_reason() {
+    let store = Arc::new(InMemoryGooseCheckpointStore::default());
+    store.insert(
+        "turn",
+        GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+    );
+    let model = Arc::new(ScriptedModel::new(vec![
+        named_tool_response("call-1", "non_existent_tool", "test", Usage::new(10, 2)),
+    ]));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let outcome = adapter(
+        store.clone(),
+        model,
+        calls,
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    )
+    .run("turn")
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.stop_reason, GooseStopReason::UnavailableTool);
+    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("unavailable_tool"));
+    let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
+    assert!(final_text.contains("not in active routes"), "Expected route explanation, got: {final_text}");
+}
+
+#[tokio::test]
+async fn loop_guard_duplicate_signature_stops_and_records_reason() {
+    let store = Arc::new(InMemoryGooseCheckpointStore::default());
+    store.insert(
+        "turn",
+        GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+    );
+    let model = Arc::new(ScriptedModel::new(vec![
+        named_tool_response("call-1", "read_counter", "same_arg", Usage::new(10, 2)),
+        named_tool_response("call-2", "read_counter", "same_arg", Usage::new(10, 2)),
+    ]));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let outcome = adapter(
+        store.clone(),
+        model,
+        calls,
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    )
+    .run("turn")
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.stop_reason, GooseStopReason::DuplicateSignature);
+    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("duplicate_signature"));
+    let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
+    assert!(final_text.contains("duplicate call signature"), "Expected duplicate explanation, got: {final_text}");
+}
+
+#[tokio::test]
+async fn loop_guard_repeated_failure_stops_and_records_reason() {
+    let store = Arc::new(InMemoryGooseCheckpointStore::default());
+    store.insert(
+        "turn",
+        GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+    );
+    let model = Arc::new(ScriptedModel::new(vec![
+        named_tool_response("call-1", "failing_tool", "arg1", Usage::new(10, 2)),
+        named_tool_response("call-2", "failing_tool", "arg2", Usage::new(10, 2)),
+    ]));
+    let adapter = adapter_with_snapshots_and_routes(
+        store.clone(),
+        model,
+        Arc::new(vec![Box::new(FailingTool)]),
+        Arc::new(Vec::new()),
+        vec![default_route("failing_tool")],
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    );
+    let outcome = adapter.run("turn").await.unwrap();
+
+    assert_eq!(outcome.stop_reason, GooseStopReason::RepeatedFailure);
+    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("repeated_failure"));
+    assert_eq!(outcome.checkpoint.repeated_failure_count, 2);
+    let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
+    assert!(final_text.contains("failed repeatedly"), "Expected failure explanation, got: {final_text}");
+}
+
+#[tokio::test]
+async fn loop_guard_no_progress_stops_and_records_reason() {
+    let store = Arc::new(InMemoryGooseCheckpointStore::default());
+    store.insert(
+        "turn",
+        GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+    );
+    let model = Arc::new(ScriptedModel::new(vec![
+        named_tool_response("call-1", "read_counter", "arg1", Usage::new(10, 2)),
+        named_tool_response("call-2", "read_counter", "arg2", Usage::new(10, 2)),
+    ]));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let outcome = adapter(
+        store.clone(),
+        model,
+        calls,
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    )
+    .run("turn")
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.stop_reason, GooseStopReason::NoProgress);
+    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("no_progress"));
+    assert_eq!(outcome.checkpoint.no_progress_count, 2);
+    let final_text = super::convert::final_text(&outcome.checkpoint.conversation).unwrap();
+    assert!(final_text.contains("without progress"), "Expected no-progress explanation, got: {final_text}");
+}
+
+#[tokio::test]
+async fn loop_guard_completion_contract_satisfied_records_completed() {
+    let store = Arc::new(InMemoryGooseCheckpointStore::default());
+    store.insert(
+        "turn",
+        GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+    );
+    let model = Arc::new(ScriptedModel::new(vec![
+        final_response("Here is the answer to your question.", Usage::new(15, 3)),
+    ]));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut adapter = adapter(
+        store.clone(),
+        model,
+        calls,
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    );
+    adapter.contract = Some(crate::agent::primary_orchestration::CompletionContract::Chat);
+
+    let outcome = adapter.run("turn").await.unwrap();
+
+    assert_eq!(outcome.stop_reason, GooseStopReason::Completed);
+    assert_eq!(outcome.checkpoint.terminal_reason.as_deref(), Some("completed"));
+    assert_eq!(
+        outcome.checkpoint.completion_state,
+        Some(crate::agent::primary_orchestration::CompletionStatus::Complete)
     );
 }

@@ -15,18 +15,29 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{
-    messages::ConversationMessage, primary_orchestration::capability::ToolRoute,
+    messages::ConversationMessage,
+    primary_orchestration::{
+        capability::{CapabilityPlan, ToolRoute},
+        completion::{evaluate_completion, CompletionContract, CompletionObservation},
+    },
     progress::AgentProgress,
 };
 
 use super::{
-    convert::{ensure_nonempty_kickoff, final_text, goose_to_openhuman, openhuman_to_goose},
+    convert::{
+        ensure_nonempty_kickoff, final_text, goose_to_openhuman, openhuman_to_goose,
+        rmcp_result_text,
+    },
     inference::OpenHumanInference,
     store::{rebuild_action_index, CheckpointRuntime},
     tools::{GooseToolRegistry, GooseToolSecurity, OpenHumanToolProvider},
     types::{GooseCheckpoint, GooseSession, GooseStopReason, GooseTurnOutcome, OpenHumanEffect},
     GooseCheckpointStore,
 };
+
+fn is_repeat_call_exempt(tool: &str) -> bool {
+    matches!(tool, "wait_subagent")
+}
 
 struct CancellationObservation;
 
@@ -83,6 +94,249 @@ impl Operation<GooseSession, OpenHumanEffect> for CancellationObservation {
     }
 }
 
+struct UnavailableRequestGuard {
+    enabled_names: HashSet<String>,
+}
+
+#[async_trait]
+impl Operation<GooseSession, OpenHumanEffect> for UnavailableRequestGuard {
+    fn name(&self) -> &'static str {
+        "openhuman_unavailable_request_guard"
+    }
+
+    async fn run(
+        &self,
+        _session: &GooseSession,
+        conversation: &Conversation,
+        emit: &Emitter,
+    ) -> Result<OperationResult<OpenHumanEffect>> {
+        let turn = messages_since_kickoff(conversation)?;
+        let answered: HashSet<&str> = turn
+            .iter()
+            .flat_map(Message::get_tool_response_ids)
+            .collect();
+        let pending = turn
+            .iter()
+            .flat_map(|message| message.content.iter())
+            .filter_map(MessageContent::as_tool_request)
+            .filter(|request| !answered.contains(request.id.as_str()))
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            return not_applicable();
+        }
+
+        let unavailable = pending.iter().find(|request| {
+            request
+                .tool_call
+                .as_ref()
+                .map(|call| !self.enabled_names.contains(call.name.as_ref()))
+                .unwrap_or(false)
+        });
+
+        let Some(unavail) = unavailable else {
+            return not_applicable();
+        };
+
+        let tool_name = unavail
+            .tool_call
+            .as_ref()
+            .map(|call| call.name.to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let explanation = format!(
+            "Turn stopped by loop guard: model requested tool '{tool_name}' which is not in active routes."
+        );
+        let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+
+        goose_agent::operation::yielded_with(vec![
+            OpenHumanEffect::from(assistant_msg),
+            OpenHumanEffect::SetTerminalReason(Some("unavailable_tool".into())),
+        ])
+    }
+}
+
+struct DuplicateSignatureGuard;
+
+#[async_trait]
+impl Operation<GooseSession, OpenHumanEffect> for DuplicateSignatureGuard {
+    fn name(&self) -> &'static str {
+        "openhuman_duplicate_signature_guard"
+    }
+
+    async fn run(
+        &self,
+        session: &GooseSession,
+        conversation: &Conversation,
+        emit: &Emitter,
+    ) -> Result<OperationResult<OpenHumanEffect>> {
+        let turn = messages_since_kickoff(conversation)?;
+        let answered: HashSet<&str> = turn
+            .iter()
+            .flat_map(Message::get_tool_response_ids)
+            .collect();
+        let pending = turn
+            .iter()
+            .flat_map(|message| message.content.iter())
+            .filter_map(MessageContent::as_tool_request)
+            .filter(|request| !answered.contains(request.id.as_str()))
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            return not_applicable();
+        }
+
+        let duplicate = pending.iter().find(|request| {
+            let Ok(call) = request.tool_call.as_ref() else {
+                return false;
+            };
+            if is_repeat_call_exempt(&call.name) {
+                return false;
+            }
+            let args = serde_json::Value::Object(call.arguments.clone().unwrap_or_default());
+            let sig = format!("{}:{}", call.name, args);
+            session.checkpoint.last_call_signature.as_deref() == Some(&sig)
+        });
+
+        let Some(dup) = duplicate else {
+            return not_applicable();
+        };
+
+        let tool_name = dup
+            .tool_call
+            .as_ref()
+            .map(|call| call.name.to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let mut response = Message::user();
+        for request in pending {
+            response = response.with_tool_response(
+                request.id.clone(),
+                Ok(CallToolResult::error(vec![ContentBlock::text(
+                    "Tool call rejected: duplicate call signature repeated consecutively",
+                )])),
+            );
+        }
+        let explanation = format!(
+            "Turn stopped by loop guard: duplicate call signature '{tool_name}' was repeated consecutively."
+        );
+        let response_msg = emit.message(response).await;
+        let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+
+        goose_agent::operation::yielded_with(vec![
+            OpenHumanEffect::from(response_msg),
+            OpenHumanEffect::from(assistant_msg),
+            OpenHumanEffect::SetTerminalReason(Some("duplicate_signature".into())),
+        ])
+    }
+}
+
+struct ObservationLoopGuard {
+    routes: Vec<ToolRoute>,
+    max_no_progress_calls: u32,
+}
+
+#[async_trait]
+impl Operation<GooseSession, OpenHumanEffect> for ObservationLoopGuard {
+    fn name(&self) -> &'static str {
+        "openhuman_observation_loop_guard"
+    }
+
+    async fn run(
+        &self,
+        session: &GooseSession,
+        conversation: &Conversation,
+        emit: &Emitter,
+    ) -> Result<OperationResult<OpenHumanEffect>> {
+        let Some(last_msg) = conversation.last() else {
+            return not_applicable();
+        };
+        if last_msg.role != rmcp::model::Role::User || !last_msg.is_tool_response() {
+            return not_applicable();
+        }
+
+        let responses = last_msg
+            .content
+            .iter()
+            .filter_map(MessageContent::as_tool_response)
+            .collect::<Vec<_>>();
+        let Some(last_resp) = responses.last() else {
+            return not_applicable();
+        };
+
+        let Some(action) = session.checkpoint.actions.get(&last_resp.id) else {
+            return not_applicable();
+        };
+
+        let current_sig = format!("{}:{}", action.tool_name, action.arguments);
+        if session.checkpoint.last_call_signature.as_deref() == Some(&current_sig) {
+            return not_applicable();
+        }
+
+        let (success, output) = match &last_resp.tool_result {
+            Ok(result) => (!result.is_error.unwrap_or(false), rmcp_result_text(result)),
+            Err(error) => (false, error.message.to_string()),
+        };
+
+        if !success {
+            let error_line = output.lines().next().unwrap_or("").trim();
+            let failure_type = format!("{}:{}", action.tool_name, error_line);
+            if session.checkpoint.last_failure_type.as_deref() == Some(&failure_type) {
+                let explanation = format!(
+                    "Turn stopped by loop guard: tool '{}' failed repeatedly with error: {}",
+                    action.tool_name, output
+                );
+                let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+                return goose_agent::operation::yielded_with(vec![
+                    OpenHumanEffect::from(assistant_msg),
+                    OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
+                    OpenHumanEffect::RecordFailure(failure_type),
+                    OpenHumanEffect::SetTerminalReason(Some("repeated_failure".into())),
+                ]);
+            }
+            return goose_agent::operation::applied(vec![
+                OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
+                OpenHumanEffect::RecordFailure(failure_type),
+            ]);
+        }
+
+        let is_mutation = self.routes.iter().any(|r| {
+            r.capability.name == action.tool_name
+                && matches!(
+                    r.capability.side_effect,
+                    crate::agent::primary_orchestration::capability::CapabilitySideEffect::LocalWrite
+                        | crate::agent::primary_orchestration::capability::CapabilitySideEffect::ExternalWrite
+                )
+        });
+
+        if !is_mutation {
+            let next_count = session.checkpoint.no_progress_count.saturating_add(1);
+            if next_count >= self.max_no_progress_calls {
+                let explanation = format!(
+                    "Turn stopped by loop guard: reached {next_count} consecutive informational tool calls without progress."
+                );
+                let assistant_msg = emit.message(Message::assistant().with_text(explanation)).await;
+                return goose_agent::operation::yielded_with(vec![
+                    OpenHumanEffect::from(assistant_msg),
+                    OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
+                    OpenHumanEffect::ResetFailure,
+                    OpenHumanEffect::IncrementNoProgress,
+                    OpenHumanEffect::SetTerminalReason(Some("no_progress".into())),
+                ]);
+            }
+            return goose_agent::operation::applied(vec![
+                OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
+                OpenHumanEffect::ResetFailure,
+                OpenHumanEffect::IncrementNoProgress,
+            ]);
+        }
+
+        goose_agent::operation::applied(vec![
+            OpenHumanEffect::SetLastCallSignature(Some(current_sig)),
+            OpenHumanEffect::ResetFailure,
+            OpenHumanEffect::ResetNoProgress,
+        ])
+    }
+}
+
 struct PrimaryCallCeiling {
     max_primary_calls: u32,
 }
@@ -107,8 +361,7 @@ impl Operation<GooseSession, OpenHumanEffect> for PrimaryCallCeiling {
 }
 
 /// Direct adapter around the vendored `goose_agent::machine::StateMachine`.
-/// It is dormant until a later gate selects it for a primary turn, so the
-/// existing TinyAgents dispatch path remains unchanged.
+/// It enforces loop guards and completion contracts for local-Qwen primary turns.
 pub struct GooseTurnAdapter {
     pub store: Arc<dyn GooseCheckpointStore>,
     pub model: Arc<dyn tinyinference::model::ChatModel<()>>,
@@ -122,6 +375,8 @@ pub struct GooseTurnAdapter {
     pub cancel: CancellationToken,
     pub max_output_tokens: Option<u32>,
     pub max_primary_calls: u32,
+    pub max_no_progress_calls: u32,
+    pub contract: Option<CompletionContract>,
 }
 
 impl GooseTurnAdapter {
@@ -160,10 +415,19 @@ impl GooseTurnAdapter {
             max_output_tokens: self.max_output_tokens,
             progress: self.progress.clone(),
         };
+        let enabled_names = CapabilityPlan::derive_enabled_names(&self.routes);
         let machine = StateMachine::new(
             vec![
                 Step::Operation(Arc::new(CancellationObservation)),
+                Step::Operation(Arc::new(UnavailableRequestGuard {
+                    enabled_names: enabled_names.clone(),
+                })),
+                Step::Operation(Arc::new(DuplicateSignatureGuard)),
                 Step::Operation(Arc::new(tools)),
+                Step::Operation(Arc::new(ObservationLoopGuard {
+                    routes: self.routes.clone(),
+                    max_no_progress_calls: self.max_no_progress_calls,
+                })),
                 Step::Operation(Arc::new(PrimaryCallCeiling {
                     max_primary_calls: self.max_primary_calls,
                 })),
@@ -177,13 +441,47 @@ impl GooseTurnAdapter {
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(64);
         let emit = Emitter::new(events_tx, self.cancel.clone());
         let drain = tokio::spawn(async move { while events_rx.recv().await.is_some() {} });
-        let session = machine.run(&runtime, session_id, &emit).await?;
+        let mut session = machine.run(&runtime, session_id, &emit).await?;
         drop(emit);
         let _ = drain.await;
 
         let final_answer = final_text(&session.checkpoint.conversation);
+
+        if let Some(contract) = &self.contract {
+            let obs = CompletionObservation {
+                final_assistant_text: final_answer.clone(),
+                informational_tools_executed: session
+                    .checkpoint
+                    .actions
+                    .values()
+                    .map(|a| a.tool_name.clone())
+                    .collect(),
+                ..Default::default()
+            };
+            let status = evaluate_completion(contract, &obs);
+            session.checkpoint.completion_state = Some(status.clone());
+            if status.is_complete() {
+                session.checkpoint.terminal_reason = Some("completed".into());
+            }
+            let expected = session.checkpoint.revision;
+            session.checkpoint.revision = expected.saturating_add(1);
+            let _ = self
+                .store
+                .compare_and_swap(session_id, expected, session.checkpoint.clone())
+                .await;
+        }
+
         let stop_reason = if self.cancel.is_cancelled() {
             GooseStopReason::Cancelled
+        } else if let Some(terminal) = session.checkpoint.terminal_reason.as_deref() {
+            match terminal {
+                "duplicate_signature" => GooseStopReason::DuplicateSignature,
+                "repeated_failure" => GooseStopReason::RepeatedFailure,
+                "unavailable_tool" => GooseStopReason::UnavailableTool,
+                "no_progress" => GooseStopReason::NoProgress,
+                "completed" => GooseStopReason::Completed,
+                _ => GooseStopReason::Yielded,
+            }
         } else if final_answer.is_some() {
             GooseStopReason::FinalAnswer
         } else if session.checkpoint.usage.primary_calls >= self.max_primary_calls {
