@@ -20,7 +20,7 @@ use crate::agent::{
         capability::{CapabilityPlan, ToolRoute},
         completion::{
             evaluate_completion, CompletionContract, CompletionObservation, GeneratedArtifact,
-            ScheduleRecord, ValidatedImage,
+            RepositoryChangeRecord, ScheduleRecord, ValidatedImage, VerificationStatus,
         },
     },
     progress::AgentProgress,
@@ -471,7 +471,7 @@ fn extract_completion_observation(
     let mut web_sources = Vec::new();
     let mut validated_images = Vec::new();
     let mut generated_artifacts = Vec::new();
-    let repository_changes = Vec::new();
+    let mut repository_changes = Vec::new();
     let mut scheduling_records = Vec::new();
     let yielded_question = None;
     let yielded_approval = None;
@@ -533,6 +533,24 @@ fn extract_completion_observation(
                         scheduling_records.push(ScheduleRecord {
                             schedule_id: sched_id.to_string(),
                             state,
+                        });
+                    }
+                    if let Some(files) = v.get("file_paths").and_then(|f| f.as_array()) {
+                        let file_paths: Vec<String> = files
+                            .iter()
+                            .filter_map(|s| s.as_str().map(ToString::to_string))
+                            .collect();
+                        let ver_str = v.get("verification").and_then(|ver| ver.as_str()).unwrap_or("unverified");
+                        let verification = match ver_str {
+                            "verified" => VerificationStatus::Verified,
+                            "failed" => VerificationStatus::Failed,
+                            _ => VerificationStatus::Unverified,
+                        };
+                        let summary = v.get("summary").and_then(|s| s.as_str()).map(ToString::to_string);
+                        repository_changes.push(RepositoryChangeRecord {
+                            file_paths,
+                            verification,
+                            summary,
                         });
                     }
                 }
