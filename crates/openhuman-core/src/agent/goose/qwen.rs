@@ -403,12 +403,10 @@ pub fn normalize_qwen_response(
     let (surviving_calls, invalid_call) = if !valid_calls.is_empty() {
         let first = valid_calls.remove(0);
         let inv = if total_blocks > 1 {
-            first_invalid.or_else(|| {
-                Some(QwenInvalidCall::MultipleCalls {
-                    count: total_blocks,
-                    raw: None,
-                })
-            })
+            first_invalid.or(Some(QwenInvalidCall::MultipleCalls {
+                count: total_blocks,
+                raw: None,
+            }))
         } else {
             None
         };
