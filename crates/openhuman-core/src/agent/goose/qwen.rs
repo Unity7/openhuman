@@ -499,9 +499,7 @@ Permitted tools and their parameter JSON schemas:\n",
 
     prompt.push_str(
         "\nIf calling a tool, use the canonical format:\n\
-<tool_call>\n\
-{\"name\": \"<exact_tool_name>\", \"arguments\": { ... }}\n\
-</tool_call>\n",
+{\"name\": \"<exact_tool_name>\", \"arguments\": { ... }}\n",
     );
 
     prompt
