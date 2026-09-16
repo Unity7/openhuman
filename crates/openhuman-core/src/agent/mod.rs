@@ -97,5 +97,9 @@ pub use schemas::{
 #[path = "agent_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "phase7_acceptance_tests.rs"]
+pub mod phase7_acceptance_tests;
+
 #[allow(unused_imports)]
 pub use harness::session::{Agent, AgentBuilder};
