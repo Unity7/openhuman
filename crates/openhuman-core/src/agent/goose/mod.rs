@@ -9,13 +9,16 @@ mod inference;
 pub mod qwen;
 mod runner;
 mod store;
-mod tools;
+pub mod tools;
 mod types;
 
 pub use qwen::{normalize_qwen_response, NormalizedQwenResponse, QwenInvalidCall};
 pub use runner::GooseTurnAdapter;
 pub use store::{FileGooseCheckpointStore, GooseCheckpointStore, InMemoryGooseCheckpointStore};
-pub use tools::GooseToolSecurity;
+pub use tools::{
+    is_same_boundary_alternative, is_terminal_route_failure, retain_authorized_alternatives,
+    GooseToolRegistry, GooseToolSecurity,
+};
 pub use types::{
     AcceptedToolAction, GooseCheckpoint, GooseStopReason, GooseTurnOutcome, GooseUsage,
     ToolObservation,
