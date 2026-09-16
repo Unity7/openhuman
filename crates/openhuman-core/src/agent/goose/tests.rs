@@ -30,9 +30,13 @@ use crate::{
     tools::{Tool, ToolResult},
 };
 
+use goose_provider_types::conversation::message::MessageContent;
+
 use super::{
-    convert::goose_to_openhuman, GooseCheckpointStore, GooseStopReason, GooseToolSecurity,
-    GooseTurnAdapter, InMemoryGooseCheckpointStore,
+    convert::{final_text, goose_to_openhuman},
+    store::FileGooseCheckpointStore,
+    GooseCheckpointStore, GooseStopReason, GooseToolSecurity, GooseTurnAdapter,
+    InMemoryGooseCheckpointStore,
 };
 
 struct ScriptedModel {
@@ -262,6 +266,12 @@ fn adapter_with_snapshots_and_routes(
 
 fn kickoff() -> Vec<ConversationMessage> {
     vec![ConversationMessage::Chat(ChatMessage::user("read alpha"))]
+}
+
+fn to_qwen_route(mut adapter: GooseTurnAdapter) -> GooseTurnAdapter {
+    adapter.provider_id = "lmstudio".into();
+    adapter.model_name = "qwen38-openhuman".into();
+    adapter
 }
 
 #[test]
@@ -993,4 +1003,202 @@ async fn denied_planned_route_cannot_execute() {
         .unwrap();
     assert!(!observation.success);
     assert_eq!(observation.output, "planned route was denied by policy");
+}
+
+#[tokio::test]
+async fn qwen_correction_persistence_and_terminal_resume_across_store_handles() {
+    let dir = tempfile::tempdir().unwrap();
+    let session_id = "qwen-correction-session";
+    let store1 = Arc::new(FileGooseCheckpointStore::new(dir.path()));
+    store1
+        .insert(
+            session_id,
+            GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+        )
+        .unwrap();
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let model1 = Arc::new(ScriptedModel::new(vec![final_response(
+        "<tool_call>\n{\"name\": \"read_counter\", \"arguments\": {invalid}}\n</tool_call>",
+        Usage::new(10, 2),
+    )]));
+    let mut adapter1 = to_qwen_route(adapter(
+        store1.clone(),
+        model1,
+        calls.clone(),
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    ));
+    adapter1.max_primary_calls = 1;
+
+    let outcome1 = adapter1.run(session_id).await.unwrap();
+
+    assert_eq!(outcome1.stop_reason, GooseStopReason::CallCeiling);
+    let checkpoint1 = store1.load(session_id).await.unwrap();
+    assert_eq!(checkpoint1.protocol_correction_count, 1);
+    assert!(!checkpoint1.terminal_protocol_failure);
+
+    let corrections1: Vec<_> = checkpoint1
+        .conversation
+        .messages()
+        .iter()
+        .filter(|m| m.metadata.agent_visible && !m.metadata.user_visible)
+        .collect();
+    assert_eq!(corrections1.len(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(checkpoint1.actions.is_empty());
+
+    let oh1 = goose_to_openhuman(&checkpoint1.conversation);
+    let oh1_str = serde_json::to_string(&oh1).unwrap();
+    assert!(!oh1_str.contains("<tool_call>"));
+    assert!(!oh1_str.contains("</tool_call>"));
+    let outcome1_str = serde_json::to_string(&outcome1.openhuman_messages).unwrap();
+    assert!(!outcome1_str.contains("<tool_call>"));
+    assert!(!outcome1_str.contains("</tool_call>"));
+
+    let store2 = Arc::new(FileGooseCheckpointStore::new(dir.path()));
+    let model2 = Arc::new(ScriptedModel::new(vec![final_response(
+        "<tool_call>\n{\"name\": \"read_counter\", \"arguments\": {invalid_again}}\n</tool_call>",
+        Usage::new(10, 2),
+    )]));
+    let adapter2 = to_qwen_route(adapter(
+        store2.clone(),
+        model2,
+        calls.clone(),
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    ));
+
+    let outcome2 = adapter2.run(session_id).await.unwrap();
+
+    assert_eq!(outcome2.stop_reason, GooseStopReason::FinalAnswer);
+    let checkpoint2 = store2.load(session_id).await.unwrap();
+    assert_eq!(checkpoint2.protocol_correction_count, 1);
+    assert!(checkpoint2.terminal_protocol_failure);
+
+    let corrections2: Vec<_> = checkpoint2
+        .conversation
+        .messages()
+        .iter()
+        .filter(|m| m.metadata.agent_visible && !m.metadata.user_visible)
+        .collect();
+    assert_eq!(corrections2.len(), 1);
+
+    assert!(final_text(&checkpoint2.conversation).is_some());
+    let has_user_visible_answer = outcome2.openhuman_messages.iter().any(|msg| match msg {
+        ConversationMessage::Chat(chat) => {
+            chat.role.as_str() == "assistant" && !chat.content.is_empty()
+        }
+        _ => false,
+    });
+    assert!(has_user_visible_answer);
+
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(checkpoint2.actions.is_empty());
+
+    let oh2 = goose_to_openhuman(&checkpoint2.conversation);
+    let oh2_str = serde_json::to_string(&oh2).unwrap();
+    assert!(!oh2_str.contains("<tool_call>"));
+    assert!(!oh2_str.contains("</tool_call>"));
+    let outcome2_str = serde_json::to_string(&outcome2.openhuman_messages).unwrap();
+    assert!(!outcome2_str.contains("<tool_call>"));
+    assert!(!outcome2_str.contains("</tool_call>"));
+}
+
+#[tokio::test]
+async fn qwen_exact_route_multiple_provider_calls_pairing_and_single_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let session_id = "qwen-pairing-session";
+    let store = Arc::new(FileGooseCheckpointStore::new(dir.path()));
+    store
+        .insert(
+            session_id,
+            GooseTurnAdapter::checkpoint_from_openhuman(&kickoff()).unwrap(),
+        )
+        .unwrap();
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let model = Arc::new(ScriptedModel::new(vec![
+        tool_response(Usage::new(10, 2)),
+        final_response("finished successfully", Usage::new(20, 3)),
+    ]));
+
+    let adapter = to_qwen_route(adapter(
+        store.clone(),
+        model.clone(),
+        calls.clone(),
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    ));
+
+    let outcome = adapter.run(session_id).await.unwrap();
+
+    assert_eq!(outcome.stop_reason, GooseStopReason::FinalAnswer);
+    assert_eq!(model.requests.lock().unwrap().len(), 2);
+
+    assert_eq!(outcome.checkpoint.actions.len(), 1);
+    assert!(outcome.checkpoint.actions.contains_key("call-1"));
+
+    for (call_id, action) in &outcome.checkpoint.actions {
+        let observation = action
+            .observation
+            .as_ref()
+            .expect("matching observation for accepted action");
+        assert_eq!(&observation.call_id, call_id);
+        assert!(observation.success);
+        assert_eq!(observation.output, "value:\"alpha\"");
+    }
+
+    let response_ids: Vec<_> = outcome
+        .checkpoint
+        .conversation
+        .messages()
+        .iter()
+        .flat_map(|m| {
+            m.content.iter().filter_map(|c| match c {
+                MessageContent::ToolResponse(r) => Some(r.id.clone()),
+                _ => None,
+            })
+        })
+        .collect();
+    assert_eq!(response_ids.len(), 1);
+    assert_eq!(response_ids[0], "call-1");
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let fresh_store = Arc::new(FileGooseCheckpointStore::new(dir.path()));
+    let duplicate_claim = fresh_store
+        .claim_execution(session_id, "call-1")
+        .await
+        .unwrap();
+    assert!(
+        !duplicate_claim,
+        "fresh handle cannot duplicate an already claimed effect"
+    );
+
+    for resp_id in &response_ids {
+        assert!(
+            outcome.checkpoint.actions.contains_key(resp_id),
+            "observation must belong to an accepted action"
+        );
+    }
+
+    let resumed = to_qwen_route(adapter(
+        fresh_store,
+        Arc::new(ScriptedModel::new(Vec::new())),
+        calls.clone(),
+        Arc::new(AllowSecurity),
+        None,
+        CancellationToken::new(),
+    ))
+    .run(session_id)
+    .await
+    .unwrap();
+    assert_eq!(resumed.stop_reason, GooseStopReason::FinalAnswer);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(resumed.checkpoint.actions.len(), 1);
+    assert!(resumed.checkpoint.actions["call-1"].observation.is_some());
 }
