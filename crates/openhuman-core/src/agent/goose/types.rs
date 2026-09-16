@@ -40,6 +40,10 @@ pub struct GooseCheckpoint {
     pub actions: BTreeMap<String, AcceptedToolAction>,
     #[serde(default)]
     pub usage: GooseUsage,
+    #[serde(default)]
+    pub protocol_correction_count: u32,
+    #[serde(default)]
+    pub terminal_protocol_failure: bool,
 }
 
 impl GooseCheckpoint {
@@ -49,6 +53,8 @@ impl GooseCheckpoint {
             conversation,
             actions: BTreeMap::new(),
             usage: GooseUsage::default(),
+            protocol_correction_count: 0,
+            terminal_protocol_failure: false,
         }
     }
 
@@ -101,6 +107,8 @@ pub(super) enum OpenHumanEffect {
         cache_creation_tokens: u64,
         reasoning_tokens: u64,
     },
+    IncrementProtocolCorrection,
+    SetTerminalProtocolFailure,
 }
 
 impl From<goose_provider_types::conversation::message::Message> for OpenHumanEffect {

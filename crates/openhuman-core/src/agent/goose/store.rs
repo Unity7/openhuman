@@ -347,11 +347,15 @@ fn apply_conversation_effect(
             let mut rebuilt = GooseCheckpoint::new(conversation.clone());
             rebuilt.revision = checkpoint.revision;
             rebuilt.usage = checkpoint.usage.clone();
+            rebuilt.protocol_correction_count = checkpoint.protocol_correction_count;
+            rebuilt.terminal_protocol_failure = checkpoint.terminal_protocol_failure;
             for message in conversation.messages() {
                 index_message(&mut rebuilt, message)?;
             }
             checkpoint.conversation = conversation;
             checkpoint.actions = rebuilt.actions;
+            checkpoint.protocol_correction_count = rebuilt.protocol_correction_count;
+            checkpoint.terminal_protocol_failure = rebuilt.terminal_protocol_failure;
         }
         ConversationEffect::PatchToolRequestMeta {
             tool_call_id,
@@ -467,6 +471,13 @@ impl EffectHandler<GooseSession, OpenHumanEffect> for CheckpointRuntime {
                         .usage
                         .cumulative_reasoning_tokens
                         .saturating_add(*reasoning_tokens);
+                }
+                OpenHumanEffect::IncrementProtocolCorrection => {
+                    next.protocol_correction_count =
+                        next.protocol_correction_count.saturating_add(1);
+                }
+                OpenHumanEffect::SetTerminalProtocolFailure => {
+                    next.terminal_protocol_failure = true;
                 }
             }
         }
