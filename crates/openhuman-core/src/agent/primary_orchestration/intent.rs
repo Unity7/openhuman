@@ -364,13 +364,10 @@ fn ordered_phrase_match(message: &str, phrases: &[&str]) -> bool {
 fn extract_http_url(message: &str) -> Option<String> {
     for token in message.split_whitespace() {
         let trimmed = token
-            .trim_start_matches(|c: char| matches!(c, '(' | '[' | '<' | '{' | '"' | '\'' | '`'))
-            .trim_end_matches(|c: char| {
-                matches!(
-                    c,
-                    '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '>' | '}' | '"' | '\'' | '`'
-                )
-            });
+            .trim_start_matches(['(', '[', '<', '{', '"', '\'', '`'])
+            .trim_end_matches([
+                '.', ',', ';', ':', '!', '?', ')', ']', '>', '}', '"', '\'', '`',
+            ]);
         let lowered = trimmed.to_ascii_lowercase();
         if lowered.starts_with("http://") || lowered.starts_with("https://") {
             return Some(trimmed.to_string());
