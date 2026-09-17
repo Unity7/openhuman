@@ -12,6 +12,7 @@ use tinyinference::tool::{ToolCall as TaToolCall, ToolDelta};
 use tinyinference::usage::Usage;
 use tokio::sync::mpsc::UnboundedSender;
 
+#[allow(unused_imports)]
 pub(crate) use super::model_helpers::{
     normalize_qwen_tool_response, repair_qwen_bare_name_tool_call,
 };

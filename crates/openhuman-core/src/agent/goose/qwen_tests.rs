@@ -24,16 +24,15 @@ fn search_schema() -> ToolSchema {
 
 fn destructive_schema() -> ToolSchema {
     ToolSchema::new(
-        "filesystem_delete",
-        "Delete a file or directory recursively",
+        "write_file",
+        "Overwrites destination file with provided content",
         serde_json::json!({
             "type": "object",
             "properties": {
                 "path": { "type": "string" },
-                "recursive": { "type": "boolean" },
-                "force": { "type": "boolean" }
+                "content": { "type": "string" }
             },
-            "required": ["path", "recursive"]
+            "required": ["path", "content"]
         }),
     )
 }
