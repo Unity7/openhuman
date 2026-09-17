@@ -25,10 +25,14 @@ pub use types::{
 };
 
 #[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
+mod adapter_tests;
+#[cfg(test)]
+mod runner_tests;
+#[cfg(test)]
+mod store_tests;
 
 #[cfg(test)]
-#[path = "qwen_tests.rs"]
 #[rustfmt::skip]
 mod qwen_tests;
+#[cfg(test)]
+mod qwen_normalization_tests;

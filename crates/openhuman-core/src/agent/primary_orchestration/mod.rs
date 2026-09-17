@@ -40,5 +40,14 @@ pub(crate) use runtime::{
 mod gate4_tests;
 
 #[cfg(test)]
+mod gate4_matrix_tests;
+
+#[cfg(test)]
+mod planner_routing_tests;
+
+#[cfg(test)]
+mod catalog_capability_tests;
+
+#[cfg(test)]
 #[path = "completion_tests.rs"]
 mod completion_tests;
