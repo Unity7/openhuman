@@ -34,8 +34,8 @@ All 8 technical implementation and verification gates have passed:
 - [x] **Verify layout gate**: `node scripts/ci/check-openhuman-rust-layout.mjs` passed cleanly.
 
 ### Stage B: Submodule & Git Reconciliation
-- [ ] **Reconcile `vendor/tinyagents` pointer**: Update submodule reference to merge `d750eb7` (Qwen history normalization) with upstream `89256cc` (non-consecutive repeat tracking).
-- [ ] **Commit layout fixes & submodule update** cleanly to `fix/local-qwen-history`.
+- [x] **Reconcile `vendor/tinyagents` pointer**: Update submodule reference to merge `d750eb7` (Qwen history normalization) with upstream `89256cc` (non-consecutive repeat tracking) at `44b4ca2`.
+- [x] **Commit layout fixes & submodule update** cleanly to `fix/local-qwen-history`.
 - [ ] **Push updated branch to fork**: `git push unity7 fix/local-qwen-history`.
 
 ### Stage C: Upstream Submission & CI Validation
