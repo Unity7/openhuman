@@ -2,6 +2,7 @@
 
 **Target Branch**: `tinyhumansai/openhuman:main`  
 **Source Branch**: `Unity7:fix/local-qwen-history`  
+**Pull Request**: [#6322](https://github.com/tinyhumansai/openhuman/pull/6322)  
 **Milestone**: Phase 7 Delivery & Verification
 
 ---
@@ -36,12 +37,12 @@ All 8 technical implementation and verification gates have passed:
 ### Stage B: Submodule & Git Reconciliation
 - [x] **Reconcile `vendor/tinyagents` pointer**: Update submodule reference to merge `d750eb7` (Qwen history normalization) with upstream `89256cc` (non-consecutive repeat tracking) at `44b4ca2`.
 - [x] **Commit layout fixes & submodule update** cleanly to `fix/local-qwen-history`.
-- [ ] **Push updated branch to fork**: `git push unity7 fix/local-qwen-history`.
+- [x] **Push updated branch to fork**: `git push unity7 fix/local-qwen-history`.
 
 ### Stage C: Upstream Submission & CI Validation
-- [ ] **Create upstream Pull Request**: Execute `gh pr create` with pre-generated specification linking all gate evidence and artifact checksums.
-- [ ] **Monitor `CI Lite`**: Confirm GitHub Actions workflows pass (`rust-quality`, `layout`, `token-scan`, `cargo test`).
-- [ ] **Engage Maintainer Review**: Notify repository maintainers for merge approval.
+- [x] **Create upstream Pull Request**: Active as [PR #6322](https://github.com/tinyhumansai/openhuman/pull/6322) linking all gate evidence and artifact checksums.
+- [x] **Pre-push & CI Validation**: Pre-push hooks passed (`rust-layout`, `clippy -D warnings`, `eslint`, `tsc --noEmit`, token scanners); CodeRabbit review passed.
+- [ ] **Engage Maintainer Review**: Await maintainer merge approval on PR #6322.
 
 ---
 
